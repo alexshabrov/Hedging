@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from web3 import Web3
 from dex.lib.logger import get_logger
 from dex.models.realtime_models import DexEventType, PriceEvent, SwapEvent
+from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PositionState
 from dex.contract.params import Params
 from dex.contract.pool_calc import split_capital_into_tokens
 
@@ -362,6 +363,13 @@ class ContractWrapper:
         amount0_wei = int(Decimal(amount0_desired) * (Decimal(10) ** Decimal(token0_decimals)))
         amount1_wei = int(Decimal(amount1_desired) * (Decimal(10) ** Decimal(token1_decimals)))
 
+        balance0 = self._get_balance(self._token0_address)
+        balance1 = self._get_balance(self._token1_address)
+
+        if int(balance0) < int(amount0_wei) or int(balance1) < int(amount1_wei):
+            raise RuntimeError(f'Insufficient balance: balance0={balance0} need0={amount0_wei} '
+                               f'balance1={balance1} need1={amount1_wei}')
+
         self._approve_token(self._token0_address, amount0_wei)
         self._approve_token(self._token1_address, amount1_wei)
 
@@ -383,7 +391,7 @@ class ContractWrapper:
 
         return self._execute_mint(mint_params)
 
-    def _execute_mint(self, mint_params: dict) -> dict:
+    def _execute_mint(self, mint_params: dict) -> MintResult:
         nonce = self._w3.eth.get_transaction_count(self._wallet_address)
         try:
             gas_estimate = self._npm_contract.functions.mint(mint_params).estimate_gas({
@@ -412,11 +420,24 @@ class ContractWrapper:
         receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
         success = bool(receipt.status)
 
-        return {
-            "ok": success,
-            "tx_hash": tx_hash.hex(),
-            "receipt": receipt,
-        }
+        if not success:
+            return MintResult(
+                ok=False,
+                tx_hash=str(tx_hash.hex()),
+                token_id=None,
+            )
+
+        logs = self._npm_contract.events.IncreaseLiquidity().process_receipt(receipt)
+        if not logs:
+            raise RuntimeError('IncreaseLiquidity event not found')
+
+        token_id = int(logs[0]["args"]["tokenId"])
+
+        return MintResult(
+            ok=True,
+            tx_hash=str(tx_hash.hex()),
+            token_id=int(token_id),
+        )
 
     def _approve_token(self, token_address: str, amount: int) -> None:
         erc20 = self._w3.eth.contract(
@@ -448,6 +469,13 @@ class ContractWrapper:
 
         signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
         self._w3.eth.send_raw_transaction(signed.raw_transaction)
+
+    def _get_balance(self, token_address: str) -> int:
+        erc20 = self._w3.eth.contract(
+            address=self._to_checksum_address(token_address),
+            abi=self._erc20_abi,
+        )
+        return int(erc20.functions.balanceOf(self._wallet_address).call())
 
     def _map_amounts(self, amount_base: float, amount_quote: float) -> tuple:
         if str(self._base_token_address).lower() == str(self._token0_address).lower():
@@ -515,3 +543,238 @@ class ContractWrapper:
 
     def _align_tick_up(self, tick: int, tick_spacing: int) -> int:
         return int(((int(tick) + int(tick_spacing) - 1) // int(tick_spacing)) * int(tick_spacing))
+
+    # ----------------------------------------------------------------------
+    def get_position_state(self, token_id: int) -> PositionState:
+        if self._npm_contract is None:
+            raise RuntimeError('npm contract is not initialized')
+        if int(token_id) <= 0:
+            raise RuntimeError('token_id must be > 0')
+
+        pos = self._npm_contract.functions.positions(int(token_id)).call()
+
+        token0 = self._to_checksum_address(pos[2])
+        token1 = self._to_checksum_address(pos[3])
+        fee = int(pos[4])
+        tick_lower = int(pos[5])
+        tick_upper = int(pos[6])
+        liquidity = int(pos[7])
+        fee_growth_inside0_last_x128 = int(pos[8])
+        fee_growth_inside1_last_x128 = int(pos[9])
+        tokens_owed0 = int(pos[10])
+        tokens_owed1 = int(pos[11])
+
+        if str(token0).lower() != str(self._token0_address).lower():
+            raise RuntimeError('token0 mismatch for pool')
+        if str(token1).lower() != str(self._token1_address).lower():
+            raise RuntimeError('token1 mismatch for pool')
+
+        pool_fee = int(self._pool_contract.functions.fee().call())
+        if int(pool_fee) != int(fee):
+            raise RuntimeError('fee mismatch for pool')
+
+        token0_decimals = self._get_decimals(token0)
+        token1_decimals = self._get_decimals(token1)
+
+        slot0 = self._pool_contract.functions.slot0().call()
+        sqrt_price_x96 = int(slot0[0])
+        tick = int(slot0[1])
+
+        fee_growth_global0_x128 = int(self._pool_contract.functions.feeGrowthGlobal0X128().call())
+        fee_growth_global1_x128 = int(self._pool_contract.functions.feeGrowthGlobal1X128().call())
+
+        tick_lower_data = self._pool_contract.functions.ticks(int(tick_lower)).call()
+        tick_upper_data = self._pool_contract.functions.ticks(int(tick_upper)).call()
+
+        q96 = 2 ** 96
+        q128 = 2 ** 128
+
+        sqrt_price = float(sqrt_price_x96) / float(q96)
+
+        price_lower = (1.0001 ** int(tick_lower)) * (10 ** (token0_decimals - token1_decimals))
+        price_upper = (1.0001 ** int(tick_upper)) * (10 ** (token0_decimals - token1_decimals))
+        price_current = float(sqrt_price ** 2) * (10 ** (token0_decimals - token1_decimals))
+
+        sqrt_lower = math.sqrt(1.0001 ** int(tick_lower))
+        sqrt_upper = math.sqrt(1.0001 ** int(tick_upper))
+
+        if sqrt_price <= sqrt_lower:
+            amount0 = float(liquidity) * (sqrt_upper - sqrt_lower) / (sqrt_lower * sqrt_upper)
+            amount1 = 0.0
+        elif sqrt_price < sqrt_upper:
+            amount0 = float(liquidity) * (sqrt_upper - sqrt_price) / (sqrt_price * sqrt_upper)
+            amount1 = float(liquidity) * (sqrt_price - sqrt_lower)
+        else:
+            amount0 = 0.0
+            amount1 = float(liquidity) * (sqrt_upper - sqrt_lower)
+
+        amount0_norm = amount0 / (10 ** token0_decimals)
+        amount1_norm = amount1 / (10 ** token1_decimals)
+
+        def _calc_fee_owed(liq, tick_cur, tick_l, tick_u, fg_global_x128,
+                           fg_out_lower_x128, fg_out_upper_x128, fg_inside_last_x128, decimals):
+            if int(tick_cur) < int(tick_l):
+                fg_inside_x128 = int(fg_out_lower_x128) - int(fg_out_upper_x128)
+            elif int(tick_cur) >= int(tick_u):
+                fg_inside_x128 = int(fg_out_upper_x128) - int(fg_out_lower_x128)
+            else:
+                fg_inside_x128 = int(fg_global_x128) - int(fg_out_lower_x128) - int(fg_out_upper_x128)
+
+            delta = int(fg_inside_x128) - int(fg_inside_last_x128)
+            return float(liq) * float(delta) / float(q128) / float(10 ** decimals)
+
+        uncollected0 = _calc_fee_owed(
+            liquidity, tick, tick_lower, tick_upper,
+            fee_growth_global0_x128, tick_lower_data[2], tick_upper_data[2],
+            fee_growth_inside0_last_x128, token0_decimals
+        ) + float(tokens_owed0) / float(10 ** token0_decimals)
+
+        uncollected1 = _calc_fee_owed(
+            liquidity, tick, tick_lower, tick_upper,
+            fee_growth_global1_x128, tick_lower_data[3], tick_upper_data[3],
+            fee_growth_inside1_last_x128, token1_decimals
+        ) + float(tokens_owed1) / float(10 ** token1_decimals)
+
+        return PositionState(
+            token0=str(token0),
+            token1=str(token1),
+            fee=float(fee) / 10000.0,
+            tick_lower=int(tick_lower),
+            tick_upper=int(tick_upper),
+            price_lower=float(price_lower),
+            price_upper=float(price_upper),
+            price_current=float(price_current),
+            liquidity=int(liquidity),
+            amount0=float(amount0_norm),
+            amount1=float(amount1_norm),
+            uncollected0=float(uncollected0),
+            uncollected1=float(uncollected1),
+        )
+
+    def decrease_liquidity(self, token_id: int, liquidity_percent: int = 100,
+                           amount0_min: int = 0, amount1_min: int = 0) -> DecreaseLiquidityResult:
+        if self._wallet_address is None:
+            raise RuntimeError('wallet_address is not set')
+        if self._private_key is None:
+            raise RuntimeError('private_key is not set')
+        if int(token_id) <= 0:
+            raise RuntimeError('token_id must be > 0')
+        if int(liquidity_percent) <= 0 or int(liquidity_percent) > 100:
+            raise RuntimeError('liquidity_percent must be 1..100')
+
+        pos = self._npm_contract.functions.positions(int(token_id)).call()
+        liquidity = int(pos[7])
+        if int(liquidity) <= 0:
+            raise RuntimeError('position liquidity is 0')
+
+        liquidity_to_remove = int(liquidity) * int(liquidity_percent) // 100
+        if int(liquidity_to_remove) <= 0:
+            raise RuntimeError('liquidity_to_remove is 0')
+
+        deadline = self._w3.eth.get_block("latest")["timestamp"] + 600
+        params = {
+            "tokenId": int(token_id),
+            "liquidity": int(liquidity_to_remove),
+            "amount0Min": int(amount0_min),
+            "amount1Min": int(amount1_min),
+            "deadline": int(deadline),
+        }
+
+        try:
+            sim = self._npm_contract.functions.decreaseLiquidity(params).call({
+                "from": self._wallet_address
+            })
+        except Exception as e:
+            raise RuntimeError(f'decreaseLiquidity simulation failed: {e}')
+
+        nonce = self._w3.eth.get_transaction_count(self._wallet_address)
+        try:
+            gas_estimate = self._npm_contract.functions.decreaseLiquidity(params).estimate_gas({
+                "from": self._wallet_address
+            })
+            gas_limit = int(gas_estimate * 1.2)
+        except Exception as e:
+            raise RuntimeError(f'Gas estimation failed: {e}')
+
+        base_fee = self._w3.eth.get_block("latest")["baseFeePerGas"]
+        max_priority_fee = self._w3.to_wei(0.1, "gwei")
+        max_fee_per_gas = base_fee + max_priority_fee
+
+        tx = self._npm_contract.functions.decreaseLiquidity(params).build_transaction({
+            "from": self._wallet_address,
+            "nonce": nonce,
+            "gas": gas_limit,
+            "maxFeePerGas": max_fee_per_gas,
+            "maxPriorityFeePerGas": max_priority_fee,
+            "type": 2,
+        })
+
+        signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
+        tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
+
+        return DecreaseLiquidityResult(
+            ok=bool(receipt.status),
+            tx_hash=str(tx_hash.hex()),
+            simulated=list(sim),
+        )
+
+    def collect_fees(self, token_id: int, amount0_max: Optional[int] = None,
+                     amount1_max: Optional[int] = None) -> CollectFeesResult:
+        if self._wallet_address is None:
+            raise RuntimeError('wallet_address is not set')
+        if self._private_key is None:
+            raise RuntimeError('private_key is not set')
+        if int(token_id) <= 0:
+            raise RuntimeError('token_id must be > 0')
+
+        if amount0_max is None:
+            amount0_max = int(2 ** 128 - 1)
+        if amount1_max is None:
+            amount1_max = int(2 ** 128 - 1)
+
+        params = {
+            "tokenId": int(token_id),
+            "recipient": self._wallet_address,
+            "amount0Max": int(amount0_max),
+            "amount1Max": int(amount1_max),
+        }
+
+        try:
+            sim = self._npm_contract.functions.collect(params).call({
+                "from": self._wallet_address
+            })
+        except Exception as e:
+            raise RuntimeError(f'collect simulation failed: {e}')
+
+        nonce = self._w3.eth.get_transaction_count(self._wallet_address)
+        try:
+            gas_estimate = self._npm_contract.functions.collect(params).estimate_gas({
+                "from": self._wallet_address
+            })
+            gas_limit = int(gas_estimate * 1.2)
+        except Exception as e:
+            raise RuntimeError(f'Gas estimation failed: {e}')
+
+        base_fee = self._w3.eth.get_block("latest")["baseFeePerGas"]
+        max_priority_fee = self._w3.to_wei(0.1, "gwei")
+        max_fee_per_gas = base_fee + max_priority_fee
+
+        tx = self._npm_contract.functions.collect(params).build_transaction({
+            "from": self._wallet_address,
+            "nonce": nonce,
+            "gas": gas_limit,
+            "maxFeePerGas": max_fee_per_gas,
+            "maxPriorityFeePerGas": max_priority_fee,
+            "type": 2,
+        })
+
+        signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
+        tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
+
+        return CollectFeesResult(
+            ok=bool(receipt.status),
+            tx_hash=str(tx_hash.hex()),
+            simulated=list(sim),
+        )
