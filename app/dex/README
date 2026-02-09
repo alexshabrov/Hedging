@@ -1,5 +1,6 @@
 Запуск примера:
-  > python -m dex.examples.swaps_realtime_example --ws-url=wss://arbitrum-mainnet.infura.io/ws/v3/<API_KEY> --pool-address=0x... --seconds=60
+  > python -m dex.examples.swaps_realtime_example --ws-url=wss://arbitrum-mainnet.infura.io/ws/v3/<KEY> --pool-address=0xc6962004f452be9203591991d15f6b388e09e8d0 --seconds=60 --rpc-url=https://arbitrum-mainnet.infura.io/v3/<KEY> --network=arbitrum
+  > PRIVATE_KEY="<KEY>" WALLET_ADDRESS="0x..." python -m dex.examples.add_liquidity_example --rpc-url=https://arbitrum-mainnet.infura.io/v3/<KEY> --network=arbitrum --pool-address=0x... --fee-pct=0.05 --price-lower=1800 --price-upper=2200 --total-quote=1000
 
 ---
 
