@@ -419,12 +419,23 @@ class ContractWrapper:
 
         receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
         success = bool(receipt.status)
+        gas_used, gas_price_wei, gas_cost_wei, gas_cost_eth = self._gas_info(receipt)
 
         if not success:
             return MintResult(
                 ok=False,
                 tx_hash=str(tx_hash.hex()),
                 token_id=None,
+                gas_used=gas_used,
+                gas_price_wei=gas_price_wei,
+                gas_cost_wei=gas_cost_wei,
+                gas_cost_eth=gas_cost_eth,
+                amount0_used_raw=None,
+                amount1_used_raw=None,
+                amount0_used=None,
+                amount1_used=None,
+                amount_base=None,
+                amount_quote=None,
             )
 
         logs = self._npm_contract.events.IncreaseLiquidity().process_receipt(receipt)
@@ -432,11 +443,36 @@ class ContractWrapper:
             raise RuntimeError('IncreaseLiquidity event not found')
 
         token_id = int(logs[0]["args"]["tokenId"])
+        amount0_raw = int(logs[0]["args"]["amount0"])
+        amount1_raw = int(logs[0]["args"]["amount1"])
+
+        token0_decimals = self._get_decimals(self._token0_address)
+        token1_decimals = self._get_decimals(self._token1_address)
+
+        amount0_used = float(amount0_raw) / float(10 ** token0_decimals)
+        amount1_used = float(amount1_raw) / float(10 ** token1_decimals)
+
+        if str(self._base_token_address).lower() == str(self._token0_address).lower():
+            amount_base = float(amount0_used)
+            amount_quote = float(amount1_used)
+        else:
+            amount_base = float(amount1_used)
+            amount_quote = float(amount0_used)
 
         return MintResult(
             ok=True,
             tx_hash=str(tx_hash.hex()),
             token_id=int(token_id),
+            gas_used=gas_used,
+            gas_price_wei=gas_price_wei,
+            gas_cost_wei=gas_cost_wei,
+            gas_cost_eth=gas_cost_eth,
+            amount0_used_raw=int(amount0_raw),
+            amount1_used_raw=int(amount1_raw),
+            amount0_used=float(amount0_used),
+            amount1_used=float(amount1_used),
+            amount_base=float(amount_base),
+            amount_quote=float(amount_quote),
         )
 
     def _approve_token(self, token_address: str, amount: int) -> None:
@@ -543,6 +579,18 @@ class ContractWrapper:
 
     def _align_tick_up(self, tick: int, tick_spacing: int) -> int:
         return int(((int(tick) + int(tick_spacing) - 1) // int(tick_spacing)) * int(tick_spacing))
+
+    def _gas_info(self, receipt) -> tuple:
+        gas_used = int(receipt['gasUsed']) if 'gasUsed' in receipt else None
+        gas_price_wei = int(receipt['effectiveGasPrice']) if 'effectiveGasPrice' in receipt else None
+        gas_cost_wei = None
+        gas_cost_eth = None
+
+        if gas_used is not None and gas_price_wei is not None:
+            gas_cost_wei = int(gas_used) * int(gas_price_wei)
+            gas_cost_eth = float(gas_cost_wei) / float(10 ** 18)
+
+        return gas_used, gas_price_wei, gas_cost_wei, gas_cost_eth
 
     # ----------------------------------------------------------------------
     def get_position_state(self, token_id: int) -> PositionState:
@@ -727,11 +775,35 @@ class ContractWrapper:
         signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
         tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
+        gas_used, gas_price_wei, gas_cost_wei, gas_cost_eth = self._gas_info(receipt)
+
+        amount0_raw = int(sim[0])
+        amount1_raw = int(sim[1])
+        token0_decimals = self._get_decimals(self._token0_address)
+        token1_decimals = self._get_decimals(self._token1_address)
+        amount0_norm = float(amount0_raw) / float(10 ** token0_decimals)
+        amount1_norm = float(amount1_raw) / float(10 ** token1_decimals)
+
+        if str(self._base_token_address).lower() == str(self._token0_address).lower():
+            amount_base = float(amount0_norm)
+            amount_quote = float(amount1_norm)
+        else:
+            amount_base = float(amount1_norm)
+            amount_quote = float(amount0_norm)
 
         return DecreaseLiquidityResult(
             ok=bool(receipt.status),
             tx_hash=str(tx_hash.hex()),
-            simulated=list(sim),
+            gas_used=gas_used,
+            gas_price_wei=gas_price_wei,
+            gas_cost_wei=gas_cost_wei,
+            gas_cost_eth=gas_cost_eth,
+            amount0_simulated_raw=int(amount0_raw),
+            amount1_simulated_raw=int(amount1_raw),
+            amount0_simulated=float(amount0_norm),
+            amount1_simulated=float(amount1_norm),
+            amount_base=float(amount_base),
+            amount_quote=float(amount_quote),
         )
 
     def collect_fees(self, token_id: int, amount0_max: Optional[int] = None,
@@ -787,9 +859,33 @@ class ContractWrapper:
         signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
         tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
+        gas_used, gas_price_wei, gas_cost_wei, gas_cost_eth = self._gas_info(receipt)
+
+        amount0_raw = int(sim[0])
+        amount1_raw = int(sim[1])
+        token0_decimals = self._get_decimals(self._token0_address)
+        token1_decimals = self._get_decimals(self._token1_address)
+        amount0_norm = float(amount0_raw) / float(10 ** token0_decimals)
+        amount1_norm = float(amount1_raw) / float(10 ** token1_decimals)
+
+        if str(self._base_token_address).lower() == str(self._token0_address).lower():
+            amount_base = float(amount0_norm)
+            amount_quote = float(amount1_norm)
+        else:
+            amount_base = float(amount1_norm)
+            amount_quote = float(amount0_norm)
 
         return CollectFeesResult(
             ok=bool(receipt.status),
             tx_hash=str(tx_hash.hex()),
-            simulated=list(sim),
+            gas_used=gas_used,
+            gas_price_wei=gas_price_wei,
+            gas_cost_wei=gas_cost_wei,
+            gas_cost_eth=gas_cost_eth,
+            amount0_simulated_raw=int(amount0_raw),
+            amount1_simulated_raw=int(amount1_raw),
+            amount0_simulated=float(amount0_norm),
+            amount1_simulated=float(amount1_norm),
+            amount_base=float(amount_base),
+            amount_quote=float(amount_quote),
         )

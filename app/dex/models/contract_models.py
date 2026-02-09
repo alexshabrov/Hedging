@@ -3,7 +3,7 @@ Contract models
 Date: 2026-02-09
 Version: 1.0
 """
-from typing import Optional, List
+from typing import Optional
 from dex.lib.strict_model import StrictModel
 
 # Mint result
@@ -11,12 +11,32 @@ class MintResult(StrictModel):
     ok: bool
     tx_hash: str
     token_id: Optional[int]
+    gas_used: Optional[int]
+    gas_price_wei: Optional[int]
+    gas_cost_wei: Optional[int]
+    gas_cost_eth: Optional[float]
+    amount0_used_raw: Optional[int]
+    amount1_used_raw: Optional[int]
+    amount0_used: Optional[float]
+    amount1_used: Optional[float]
+    amount_base: Optional[float]
+    amount_quote: Optional[float]
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
             'ok': self.ok,
             'tx_hash': self.tx_hash,
             'token_id': self.token_id,
+            'gas_used': self.gas_used,
+            'gas_price_wei': self.gas_price_wei,
+            'gas_cost_wei': self.gas_cost_wei,
+            'gas_cost_eth': self.gas_cost_eth,
+            'amount0_used_raw': self.amount0_used_raw,
+            'amount1_used_raw': self.amount1_used_raw,
+            'amount0_used': self.amount0_used,
+            'amount1_used': self.amount1_used,
+            'amount_base': self.amount_base,
+            'amount_quote': self.amount_quote,
         }
 
     @classmethod
@@ -25,19 +45,47 @@ class MintResult(StrictModel):
             ok=bool(data['ok']),
             tx_hash=str(data['tx_hash']),
             token_id=None if data['token_id'] is None else int(data['token_id']),
+            gas_used=None if data['gas_used'] is None else int(data['gas_used']),
+            gas_price_wei=None if data['gas_price_wei'] is None else int(data['gas_price_wei']),
+            gas_cost_wei=None if data['gas_cost_wei'] is None else int(data['gas_cost_wei']),
+            gas_cost_eth=None if data['gas_cost_eth'] is None else float(data['gas_cost_eth']),
+            amount0_used_raw=None if data['amount0_used_raw'] is None else int(data['amount0_used_raw']),
+            amount1_used_raw=None if data['amount1_used_raw'] is None else int(data['amount1_used_raw']),
+            amount0_used=None if data['amount0_used'] is None else float(data['amount0_used']),
+            amount1_used=None if data['amount1_used'] is None else float(data['amount1_used']),
+            amount_base=None if data['amount_base'] is None else float(data['amount_base']),
+            amount_quote=None if data['amount_quote'] is None else float(data['amount_quote']),
         )
 
 # Decrease liquidity result
 class DecreaseLiquidityResult(StrictModel):
     ok: bool
     tx_hash: str
-    simulated: List
+    gas_used: Optional[int]
+    gas_price_wei: Optional[int]
+    gas_cost_wei: Optional[int]
+    gas_cost_eth: Optional[float]
+    amount0_simulated_raw: Optional[int]
+    amount1_simulated_raw: Optional[int]
+    amount0_simulated: Optional[float]
+    amount1_simulated: Optional[float]
+    amount_base: Optional[float]
+    amount_quote: Optional[float]
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
             'ok': self.ok,
             'tx_hash': self.tx_hash,
-            'simulated': list(self.simulated),
+            'gas_used': self.gas_used,
+            'gas_price_wei': self.gas_price_wei,
+            'gas_cost_wei': self.gas_cost_wei,
+            'gas_cost_eth': self.gas_cost_eth,
+            'amount0_simulated_raw': self.amount0_simulated_raw,
+            'amount1_simulated_raw': self.amount1_simulated_raw,
+            'amount0_simulated': self.amount0_simulated,
+            'amount1_simulated': self.amount1_simulated,
+            'amount_base': self.amount_base,
+            'amount_quote': self.amount_quote,
         }
 
     @classmethod
@@ -45,20 +93,47 @@ class DecreaseLiquidityResult(StrictModel):
         return cls(
             ok=bool(data['ok']),
             tx_hash=str(data['tx_hash']),
-            simulated=list(data['simulated']),
+            gas_used=None if data['gas_used'] is None else int(data['gas_used']),
+            gas_price_wei=None if data['gas_price_wei'] is None else int(data['gas_price_wei']),
+            gas_cost_wei=None if data['gas_cost_wei'] is None else int(data['gas_cost_wei']),
+            gas_cost_eth=None if data['gas_cost_eth'] is None else float(data['gas_cost_eth']),
+            amount0_simulated_raw=None if data['amount0_simulated_raw'] is None else int(data['amount0_simulated_raw']),
+            amount1_simulated_raw=None if data['amount1_simulated_raw'] is None else int(data['amount1_simulated_raw']),
+            amount0_simulated=None if data['amount0_simulated'] is None else float(data['amount0_simulated']),
+            amount1_simulated=None if data['amount1_simulated'] is None else float(data['amount1_simulated']),
+            amount_base=None if data['amount_base'] is None else float(data['amount_base']),
+            amount_quote=None if data['amount_quote'] is None else float(data['amount_quote']),
         )
 
 # Collect fees result
 class CollectFeesResult(StrictModel):
     ok: bool
     tx_hash: str
-    simulated: List
+    gas_used: Optional[int]
+    gas_price_wei: Optional[int]
+    gas_cost_wei: Optional[int]
+    gas_cost_eth: Optional[float]
+    amount0_simulated_raw: Optional[int]
+    amount1_simulated_raw: Optional[int]
+    amount0_simulated: Optional[float]
+    amount1_simulated: Optional[float]
+    amount_base: Optional[float]
+    amount_quote: Optional[float]
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
             'ok': self.ok,
             'tx_hash': self.tx_hash,
-            'simulated': list(self.simulated),
+            'gas_used': self.gas_used,
+            'gas_price_wei': self.gas_price_wei,
+            'gas_cost_wei': self.gas_cost_wei,
+            'gas_cost_eth': self.gas_cost_eth,
+            'amount0_simulated_raw': self.amount0_simulated_raw,
+            'amount1_simulated_raw': self.amount1_simulated_raw,
+            'amount0_simulated': self.amount0_simulated,
+            'amount1_simulated': self.amount1_simulated,
+            'amount_base': self.amount_base,
+            'amount_quote': self.amount_quote,
         }
 
     @classmethod
@@ -66,7 +141,16 @@ class CollectFeesResult(StrictModel):
         return cls(
             ok=bool(data['ok']),
             tx_hash=str(data['tx_hash']),
-            simulated=list(data['simulated']),
+            gas_used=None if data['gas_used'] is None else int(data['gas_used']),
+            gas_price_wei=None if data['gas_price_wei'] is None else int(data['gas_price_wei']),
+            gas_cost_wei=None if data['gas_cost_wei'] is None else int(data['gas_cost_wei']),
+            gas_cost_eth=None if data['gas_cost_eth'] is None else float(data['gas_cost_eth']),
+            amount0_simulated_raw=None if data['amount0_simulated_raw'] is None else int(data['amount0_simulated_raw']),
+            amount1_simulated_raw=None if data['amount1_simulated_raw'] is None else int(data['amount1_simulated_raw']),
+            amount0_simulated=None if data['amount0_simulated'] is None else float(data['amount0_simulated']),
+            amount1_simulated=None if data['amount1_simulated'] is None else float(data['amount1_simulated']),
+            amount_base=None if data['amount_base'] is None else float(data['amount_base']),
+            amount_quote=None if data['amount_quote'] is None else float(data['amount_quote']),
         )
 
 # Position state
