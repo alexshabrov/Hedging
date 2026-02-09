@@ -1,0 +1,212 @@
+Hedging — как этим пользоваться
+=================================
+
+Коротко
+– Проект моделирует исполнение лимитных заявок и «чейз» (цепочки лимиток) на данных Binance (UM futures trades).  
+– Данные скачиваются и подготавливаются скриптом `app/01_prepare_data.py`.  
+– Фандинг скачивается скриптом `app/01_download_funding.py` и сохраняется в `<base_dir>/<SYMBOL>/csv/funding.csv`.  
+– Исследования и примеры — в ноутбуках `app/02_limit_exec.ipynb`, `app/04_indicators.ipynb`, `app/05_logic_proto.ipynb`, `app/06_logic.ipynb`, `app/08_mass_test.ipynb`.  
+– Массовые эксперименты запускаются скриптом `app/07_mass_test.py` с конфигом в `app/run_confs/*.json`.  
+– Пороги могут задаваться в шагах цены или в процентах от текущей цены (см. `threshold_as_perc`), таргеты — всегда в процентах.  
+– Поддержан односторонний режим (`only_side`), в котором вход возможен только по выбранной стороне; при возврате в нейтральную зону или достижении таргета происходит немедленный выход.
+– Все CLI поддерживают множественные символы через `--symbols` (список через запятую). Массовые прогоны также принимают несколько конфигов `--confs` и прогоняют все комбинации (symbol × conf).
+
+Требования
+– Python 3.10+  
+– Пакеты: numpy, pandas, numba, matplotlib, tqdm, jupyter (для ноутбуков)  
+– Утилита `wget` (для загрузки исторических архивов)  
+
+Запуск через Docker
+1) Создайте файл .env в корне и при необходимости укажите токен для Jupyter:
+   TOKEN=your_token_here
+2) Соберите и поднимите сервис:
+   docker compose build && docker compose up -d
+3) Откройте Jupyter в браузере: http://localhost:8891 (токен из .env).  
+   Код монтируется в контейнер в /hedging/app, данные — в /_data (хостовая папка /hedging_data).  
+
+Основной способ работы со скриптами — внутри контейнера
+1) Узнайте имя контейнера:
+   docker compose ps
+2) Зайдите внутрь:
+   docker exec -it <container_name> bash
+3) Перейдите в каталог с кодом:
+   cd /hedging/app
+4) Примеры запуска скриптов из контейнера:
+   # подготовка данных
+   python 01_prepare_data.py --symbols BTCUSDT --from-date 2024-01-04
+   # несколько символов
+   python 01_prepare_data.py --symbols BTCUSDT,ETHUSDT --from-date 2024-01-04
+   
+   # скачивание фандинга
+   python 01_download_funding.py --symbols BTCUSDT
+   # несколько символов
+   python 01_download_funding.py --symbols BTCUSDT,ETHUSDT
+   
+   # массовые тесты
+   python 07_mass_test.py \
+     --symbols BTCUSDT,ETHUSDT \
+     --n-workers 6 \
+     --n-tests 20000 \
+     --confs example_conf,another_conf \
+     --drop-chases 1
+
+Где всё хранится (пути и кэш)
+– Базовые пути задаются в `app/params.py`:
+
+  - `PARAMS['base_dir']` — корень данных, например `/_data/base`
+  - `PARAMS['download_threads']` — число потоков для скачивания
+  - `PARAMS['split_map_min_days']` — минимальный разрыв между сменами шагов
+
+– Структура директорий для каждого символа `<SYMBOL>`:
+  - `<base_dir>/<SYMBOL>/data` — исходные архивы `*-trades-YYYY-MM-DD.zip`
+  - `<base_dir>/<SYMBOL>/cache/npy` — NPY-кэш по шагам цены/объёма
+  - `<base_dir>/<SYMBOL>/cache/pickle` — итоговые блоки в pickle
+  - `<base_dir>/<SYMBOL>/cache/steps` — кэш минимальных шагов за день (json)
+  - `<base_dir>/<SYMBOL>/results` — результаты массовых прогонов по воркерам
+
+Шаг 1. Подготовка данных — app/01_prepare_data.py
+Скрипт скачивает архивы трейдов, определяет минимальные шаги цены/объёма по дням, строит «split map», конвертирует CSV→NPY с квантованием и сохраняет блоки в pickle.
+
+Вариант А (аргументы CLI):
+  python app/01_prepare_data.py --symbols BTCUSDT --from-date 2024-01-04
+
+Вариант Б (через переменные окружения):
+  export SYMBOLS=BTCUSDT
+  export FROM_DATE=2024-01-04
+  python app/01_prepare_data.py
+
+Также скачайте фандинг (история фандинговых ставок):
+
+Вариант А (аргументы CLI):
+  python app/01_download_funding.py --symbols BTCUSDT
+
+Вариант Б (через переменные окружения):
+  export SYMBOLS=BTCUSDT
+  python app/01_download_funding.py
+
+Что получите:
+– Скачанные архивы в `<base_dir>/<SYMBOL>/data`  
+– Кэш шагов в `<base_dir>/<SYMBOL>/cache/steps/*.json`  
+– Распил по шагам и NPY-кэш в `<base_dir>/<SYMBOL>/cache/npy`  
+– Готовые блоки (массивы + шаги) в `<base_dir>/<SYMBOL>/cache/pickle/<SYMBOL>.pkl`  
+– Графики с примерами в `img/<SYMBOL>/steps.png` и `img/<SYMBOL>/blockXX.png`  
+– Фандинг в `<base_dir>/<SYMBOL>/csv/funding.csv`  
+
+Ноутбуки — что внутри и зачем
+– app/02_limit_exec.ipynb  
+  Базовая симуляция исполнения одиночной лимитной заявки (см. `lib/limit_exec.py`). Можно быстро играться с индексом, сторонами, временем ожидания и смотреть графики исполнения.
+
+– app/04_indicators.ipynb  
+  Индикаторы тренда и волатильности на окнах, согласованных по времени (см. `lib/indicators.py`): tanh(corr) для тренда и std(доходностей) для волатильности.
+
+– app/05_logic_proto.ipynb  
+  Прототип логики открытия/закрытия через пороги/таргеты. Используется для экспериментов и визуальной проверки.
+
+– app/06_logic.ipynb  
+  Финализированная логика (см. `lib/logic.py`): пороги, таргеты, чейз-ордеры, трейсы, визуализация линий/сделок/нарушений post-only и т.д.
+
+– app/08_mass_test.ipynb  
+  Анализ результатов массовых прогонов: агрегации, метрики, сводки; читает результаты из `<base_dir>/<SYMBOL>/results`.
+
+Шаг 2. Массовые прогоны — app/07_mass_test.py
+Скрипт запускает несколько процессов, каждый случайно выбирает блок/индекс, строит параметры из конфигурации, гоняет логику и сохраняет результаты партиями в `<base_dir>/<SYMBOL>/results/<SYMBOL>.mass_test.w{worker}.pkl`.
+
+CLI аргументы (или через env):
+– `--symbols` (или `SYMBOLS`) — список символов через запятую  
+– `--n-workers` (или `N_WORKERS`) — число процессов (по умолчанию 5)  
+– `--n-tests` (или `N_TESTS`) — всего тестов (обязателен, если нет env)  
+– `--confs` (или `CONFS`) — список имён JSON-конфигов в `app/run_confs/<name>.json` (через запятую)  
+– `--drop-chases` — 1/0, удалять ли детализированные «chases» из результата (уменьшает размер)
+
+Пример запуска:
+  python app/07_mass_test.py \
+    --symbols BTCUSDT,ETHUSDT \
+    --n-workers 6 \
+    --n-tests 20000 \
+    --confs example_conf,another_conf \
+    --drop-chases 1
+
+Формат конфигурации (`app/run_confs/<name>.json`)
+Обязательные поля (скаляры):
+  "max_time_ms", "network_delay_ms", "distance_steps",
+  "threshold_as_perc", "d_top_threshold", "d_btm_threshold",
+  "tf_ms", "period",
+  "only_side", "entrance_timeout_ms"
+
+Обязательные поля (диапазон с шагом или список значений):
+  "d_top_target_perc": { "min": ..., "max": ..., "step": ... } ИЛИ [0.5, 1, 2, ...],
+  "d_btm_target_perc": { "min": ..., "max": ..., "step": ... } ИЛИ [0.5, 1, 2, ...]
+
+Поля со списками/диапазонами:
+- `d_top_target_perc`, `d_btm_target_perc` поддерживают 2 режима:
+  - объект-диапазон `{ "min": ..., "max": ..., "step": ... }` — значение случайно выбирается по шагу из интервала
+  - список значений `[0.5, 1.0, 2.0, ...]` — значение случайно выбирается из заданного списка
+- Поле `test_volume_usd` поддерживает 2 режима:
+- объект-диапазон `{ "min": ..., "max": ..., "step": ... }` — объём случайно выбирается по шагу из интервала
+- список значений `[1000, 5000, ...]` — объём случайно выбирается из заданного списка
+
+Дополнительные флаги:
+- `targets_sync` (true/false, по умолчанию false): если true, значения `d_top_target_perc` и `d_btm_target_perc` генерируются равными — берётся одно случайное значение из распределения `d_top_target_perc` и применяется к обеим сторонам.
+
+Пример фрагмента конфига с синхронизацией таргетов:
+{
+  "threshold_as_perc": true,
+  "d_top_threshold": 0.1,
+  "d_btm_threshold": 0.1,
+  "test_volume_usd": [10000, 20000, 30000],
+  "d_top_target_perc": [0.5, 1.0, 1.5, 2.0],
+  "d_btm_target_perc": { "min": 0.5, "max": 2.0, "step": 0.5 },
+  "targets_sync": true,
+  "tf_ms": 300000,
+  "period": 30,
+  "only_side": [-1, 1],
+  "entrance_timeout_ms": 300000
+}
+
+Семантика новых полей:
+- `threshold_as_perc` (true/false): если true, пороги `d_top_threshold`/`d_btm_threshold` интерпретируются как проценты от текущей цены (как таргеты), иначе — в шагах цены.
+- `only_side` (-1, 0, 1 или список этих значений): -1 — только нижняя половина (short), 0 — обе стороны, 1 — только верхняя половина (long). Если указан список, на каждом тесте выбирается случайное значение.
+- `entrance_timeout_ms` (>= 0): если `only_side != 0` и вход не произошёл в течение этого времени с момента старта, логика завершается.
+  В одностороннем режиме после входа выход происходит немедленно при возврате в нейтральную зону или при достижении таргета.
+
+Минимальный пример:
+{
+  "max_time_ms": 120000,
+  "network_delay_ms": 100,
+  "distance_steps": 5,
+  "threshold_as_perc": false,
+  "d_top_threshold": 20,
+  "d_btm_threshold": 20,
+  "tf_ms": 60000,
+  "period": 30,
+  "only_side": 0,
+  "entrance_timeout_ms": 0,
+  "test_volume_usd": { "min": 50, "max": 200, "step": 50 },
+  "d_top_target_perc": { "min": 5, "max": 20, "step": 5 },
+  "d_btm_target_perc": { "min": 5, "max": 20, "step": 5 }
+}
+
+Выход:
+– Индивидуальные pickle-файлы на воркер: `<base_dir>/<SYMBOL>/results/<SYMBOL>.mass_test.w<i>.pkl`  
+– Каждый элемент содержит: параметры старта, индикаторы t/v, сжатую статистику логики (`stat`), а при `drop-chases=0` — и детальные «chases».  
+– Для последующего анализа используйте `app/08_mass_test.ipynb`.  
+
+Примечание:
+- При срабатывании `entrance_timeout_ms` без входа результат будет без сделок (пустые `groups`/`logic_trace`). Для фильтрации таких прогонов ориентируйтесь на `stat['agg']['n_chases'] == 0` или `stat['agg']['total_trades_executed'] == 0`.
+
+Полезные детали
+– Первый запуск функций с `@njit` (numba) компилирует их JIT — это нормально.  
+– Для скачивания истории требуется `wget`. Если скачанный файл нулевого размера — он удаляется (дня ещё нет в архиве).  
+– Визуализации сохраняются в `img/<SYMBOL>`.  
+– Если меняете `PARAMS['base_dir']`, пересоздайте каталоги и убедитесь, что пользователю доступна запись.  
+
+TL;DR: быстрый старт
+1) Установить зависимости и `wget`  
+2) Подготовить данные:
+   python app/01_prepare_data.py --symbol BTCUSDT --from-date 2024-01-04
+3) Открыть ноутбуки для исследования (например, `app/06_logic.ipynb`)  
+4) Запустить массовые прогоны:
+   python app/07_mass_test.py --symbol BTCUSDT --n-workers 6 --n-tests 20000 --conf-name example_conf --drop-chases 1
+5) Проанализировать результаты в `app/08_mass_test.ipynb`  
+
+

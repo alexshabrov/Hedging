@@ -1,0 +1,9 @@
+numba
+pandas
+matplotlib
+pydantic==2.2.0
+orjson
+jupyter
+python-binance
+itables
+orjson

@@ -1,0 +1,18 @@
+{
+  "description": "Fixed volumes with 1 unit thresholds (v2)",
+  "test_volume_usd": [10000, 30000, 50000, 70000, 90000],
+  "max_time_ms": 10000,
+  "network_delay_ms": 110,
+  "distance_steps": 1,
+  "threshold_as_perc": false,
+  "d_top_threshold": 1,
+  "d_btm_threshold": 1,
+  "d_top_target_perc": [1, 2, 3, 4, 5],
+  "d_btm_target_perc": [1, 2, 3, 4, 5],
+  "targets_sync": true,
+  "tf_ms": 300000,
+  "period": 30,
+  "only_side": 0,
+  "entrance_timeout_ms": 300000
+}
+

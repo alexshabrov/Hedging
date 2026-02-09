@@ -1,0 +1,308 @@
+Запуск примеров:
+  > python -m live.examples.realtime_example --symbol=WLFIUSDC --seconds=60
+  > python -m live.examples.exchange_example --symbol=WLFIUSDC --side=BUY --position-side=LONG --quote=50
+  > python -m live.examples.position_chase_example --symbol=WLFIUSDC --side=BUY --quote=500
+  > python -m live.examples.hedge_example --symbol=SOLUSDC --mode=both --quote=500 --trigger-long-pct=0.05 --trigger-short-pct=0.05 --target-long-pct=0.15 --target-short-pct=0.15
+
+---
+
+## `live` — runtime для live-trading (realtime + chase + hedge)
+
+Пакет `live` — автономный слой для **реального исполнения** сделок и **хэдж-логики** поверх realtime market-data.
+Сейчас реализованы коннекторы к **Binance Futures** (торговля + `bookTicker`) и “ядро” хедж-движка.
+
+Ключевые принципы:
+- **StrictModel + Enum**: все публичные схемы — `pydantic` с `strict=True` и `extra=forbid` (см. `lib/strict_model.py`).
+- **Единицы (units), а не float**: в “ядре” ходят только целые `price_units` и `base_units`. Преобразование идёт через `Rule`:
+  - запрещены экспоненты (`"1e-3"`), отрицательные и “не выровненные” по шагу значения;
+  - `Rule._to_units(...)` требует кратность `price_step/lot_step`, иначе исключение (см. `exchanges/exchange_models.py`).
+- **Единая граница потоков — очередь**: и `Position`, и `HedgeEngine` строят внутренний event-loop вокруг очереди; все фоновые источники событий пушат только туда.
+- **Realtime без “размазывания” тиков**: `Position` коалесит book-трафик (держит последний `BookTicker` и гарантирует не больше одного pending book item в очереди).
+- **Филлы — буфер+дедуп+агрегация**:
+  - `FillsRouter` дедупит по `trade_id` с TTL (по умолчанию 5 минут) и буферит по `order_id` до `attach_order`;
+  - `FillsAggregator` собирает пачку трейдов одной заявки в `AggregatedFill` по окну `tick_ms` (цена агрегата = последняя цена).
+- **Maker-only chase**: `Position` работает пост-онли лимитками (GTX). При `PRICE_VIOLATION` — cooldown, при `DOES_NOT_EXIST` на modify — режим “filled-by-deletion” (см. `exchanges/position.py`).
+- **Без молчаливых фолбэков**: критические нарушения — исключение или перевод `HedgeEngine` в `FAILED`; `check()` всегда поднимет залоченную фатальную ошибку.
+- **Наблюдаемость**: `HedgeEngine.status()` отдаёт `HedgeSnapshot`, `status_json()` — `orjson` bytes (см. `logic/hedging.py`, `logic/models.py`).
+
+---
+
+## Архитектура и компоненты (кратко)
+
+### `live/exchanges/*` — биржевой слой
+
+- **`exchange_interface.py`**
+  - `ExchangeInterface`: правила (rules), торговые операции, callbacks на филлы.
+  - `RealtimeInterface`: подписки на realtime (`bookTicker`) и управление жизненным циклом.
+
+- **`exchange_models.py`**
+  - строгие модели: `Rule`, `Fill`, `BookTicker`, плюс модели сообщений loop’ов (`ChaseCommand`, `PositionEvent`, `ChaseResponse`, …).
+  - `Rule` — центральная штука для “units”: `price_to_units/volume_to_units` и обратные `*_from_units`.
+    Важно: `*_to_units` валидирует формат (без `e/E`), знак (только > 0) и кратность шагу (иначе exception).
+
+- **`exchange_factory.py`**
+  - `get_exchange_class("Binance")` и `get_realtime_class("Binance")`.
+
+- **`binance/binance_trading.py`**
+  - Торговый коннектор (REST + user-data WS), выдаёт филлы через callback.
+  - Важный параметр: `hedge_mode` (dual-side vs one-way). Для `Position`/`HedgeEngine` нужен **one-way**, т.е. `hedge_mode=False`.
+  - Ошибки операций маппятся в `OrderError` (включая `PRICE_VIOLATION`, `DOES_NOT_EXIST`, `NEEDS_REPAIR`).
+  - Лимиты Binance учитываются по заголовкам (`x-mbx-used-weight-1m`, `x-mbx-order-count-*`) и при превышении — делается sleep.
+  - В `__init__()` вызывается `_check_status()`: коннектор **может переключать** режим аккаунта Binance Futures (`/fapi/v1/positionSide/dual`) под `hedge_mode`.
+  - WS user-data:
+    - `ORDER_TRADE_UPDATE` → `Fill` (orderId/tradeId/lastFilledQty/lastFilledPrice) в int units;
+    - `ALGO_UPDATE` со статусом `TRIGGERED` → `Fill` с `order_id=algoId` и `trade_id="ALGO:<algoId>:<time_ms>"`.
+
+- **`binance/binance_realtime.py`**
+  - Realtime коннектор `bookTicker`.
+  - `subscribe(uid, symbol)` возвращает итерируемый канал `RealtimeChannel`, отдающий `BookTicker` в int units.
+  - Архитектура подписок: по `symbol` держится словарь `uid -> channel`, подписка в WS делается один раз на символ, отписка происходит когда последний `uid` ушёл.
+  - Канал bounded: `CHAN_SIZE=100_000`; при переполнении `push()` бросает ошибку (это намеренно, чтобы не “тихо” терять рынок).
+  - Формат `bookTicker` строго валидируется: типы полей, отсутствие экспонент, непустые строки; иначе коннектор лочит `last_error` и останавливается.
+
+### `live/exchanges/position.py` — maker “chase” исполнитель
+
+`Position` — унифицированный executor, который:
+- работает maker-only через **GTX post-only LIMIT**,
+- по `BookTicker` создаёт/модифицирует лимитку (BUY→bid, SELL→ask) пока не заполнит цель,
+- собирает филлы через `FillsRouter` + `FillsAggregator` и ведёт per-order учёт, чтобы не было double-count,
+- выдаёт наружу события (`PositionEvent`) и финальный результат (`ChaseResponse`) через `loop()`.
+
+При `stop()` делает cleanup:
+- удаляет активную лимитку,
+- если осталась экспозиция — закрывает reduce-only MARKET-ом, чтобы занулить base balance.
+
+Дополнительные контракты `Position`, которые важны при эксплуатации:
+- **one-way строго**: `exchange.is_hedge_mode()` должен быть `False`, иначе `Position` сразу падает.
+- **один chase за раз**: пока активен `_ChaseState`, новый `CHASE` запрещён.
+- **коалесинг book-трафика**: `_rt_thread` кладёт в очередь не каждый тик, а “сигнал обновления”, при этом актуальный book хранится в `self.book`.
+- **GTX/ошибки**:
+  - `PRICE_VIOLATION` на create/modify → `cooldown` на `gtx_cooldown_ms` и событие `CHASE_PRICE_VIOLATION`;
+  - `DOES_NOT_EXIST` на modify → “filled-by-deletion”: ордер помечается терминальным и добирается до `active_volume_units`.
+- **entrance timeout**: если `entrance_timeout_ms>0` и chase так и не стартовал — эмитится `PositionEvent(ENTRANCE_TIMEOUT)` (используется хеджем для `LONG_ONLY/SHORT_ONLY`).
+
+### `live/exchanges/fills_router.py` и `fills_aggregator.py` — филлы
+
+- `FillsRouter`: буфер + дедуп по `trade_id`, “attach” по `order_id`, чтобы филлы не терялись.
+- `FillsAggregator`: агрегирует пачку `Fill` одной заявки в `AggregatedFill` (окно `tick_ms`).
+
+### `live/logic/hedging.py` + `live/logic/models.py` — HedgeEngine
+
+`HedgeEngine` — state-machine:
+- инициализирует уровни (`HedgeLines`) строго один раз от mid первой котировки (`mid=(bid+ask)//2`), конвертируя `pct_x10000` в абсолютные дельты через `pct_x10000_mul_price`;
+- ждёт триггер (`WAITING_TRIGGER`): цена выше `top_threshold` → открывает LONG, ниже `btm_threshold` → открывает SHORT (учитывая `HedgeMode`);
+- при триггере вызывает callback `on_volume(req) -> int base_units` и запускает maker-chase на вход (через `Position`);
+- после входа (`ACTIVE`) закрывает:
+  - по достижении таргета (`TARGET`),
+  - по возврату в нейтральную зону (`NEUTRAL`),
+  - или принудительно (`FORCED`, если выставлен `close_requested`);
+- пишет метрики по каждому chase: intended price, avg price, slippage, fills, gtx violations, exchange errors.
+
+Режимы:
+- `HedgeMode.BOTH`: нейтральное закрытие возвращает в `WAITING_TRIGGER` и цикл продолжается.
+- `HedgeMode.LONG_ONLY` / `SHORT_ONLY`: вход только с одной стороны (есть `entrance_timeout_ms`).
+
+Потоки/очереди `HedgeEngine`:
+- `rt_thread`: читает realtime-канал (BookTicker) → пушит в внутреннюю очередь;
+- `pos_thread`: читает `Position.loop()` → пушит `PositionEvent/ChaseResponse`;
+- `main_thread`: единый диспетчер событий и state-machine. Любая ошибка внутри переводит хедж в `FAILED` через `_fail()`.
+
+### `live/lib/*` — инфраструктура
+
+- `strict_model.py`: базовый `StrictModel` (pydantic политика).
+- `ws_client.py`: WebSocket клиент с reconnect и retry-очередью.
+- `logger.py`: логгер с микросекундами (уровень через `LOG_LEVEL`).
+
+---
+
+## Важные “острые углы” (то, что реально может удивить в проде)
+
+- **Переключение режима аккаунта Binance**: `Binance(..., hedge_mode=...)` в конструкторе проверяет и при необходимости переключает `/positionSide/dual`.
+  Это глобальная настройка аккаунта фьючерсов — учитывайте, если параллельно торгуете руками/другим софтом.
+
+- **`Position.stop()` может создать MARKET ордер**: если после chase осталась ненулевая `base_balance_units`, `Position` в stop-path делает reduce-only MARKET,
+  чтобы занулить экспозицию. Это намеренно, но это “реальная кнопка”.
+
+- **`filled-by-deletion` может быть консервативным**: при `DOES_NOT_EXIST` на modify `Position` считает ордер заполненным до `active_volume_units`.
+  Это защищает от “потерянных” филлов на некоторых поведениях биржи, но может переоценить факт заполнения при нетипичных кейсах.
+
+- **Backpressure в realtime**: `RealtimeChannel` bounded, и при переполнении бросает ошибку. Если consumer медленный,
+  вы не “тихо” пропускаете рынок — вы останавливаетесь ошибкой (и это правильно для корректности, но требует мониторинга).
+
+---
+
+## Установка как пакета (теперь `pyproject.toml` лежит внутри `app/live`)
+
+### Вариант A: editable из корня репозитория
+
+```bash
+python -m pip install -U pip
+python -m pip install -e app/live
+```
+
+### Вариант B: editable прямо из папки `app/live`
+
+```bash
+cd mimir/trading/Hedging/app/live
+python -m pip install -e .
+```
+
+---
+
+## Запуск `app/live_example.py` внутри Docker-контейнера
+
+Файл `app/live_example.py` — это “внешний” скрипт (лежит рядом с остальными скриптами `app/*`) и **импортирует пакет `live`**.
+Внутри контейнера код репозитория монтируется в `/hedging`, а папка со скриптами — `/hedging/app`.
+
+### 1) Зайти в контейнер
+
+Из хоста, из корня `mimir/trading/Hedging`:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker exec -it <container_name> bash
+```
+
+### 2) Установить пакет `live` (один раз)
+
+Внутри контейнера:
+
+```bash
+cd /hedging/app
+python -m pip install -U pip
+python -m pip install -e live
+```
+
+### 3) Задать ключи и запустить хедж через `live_example.py`
+
+Внутри контейнера:
+
+```bash
+export BINANCE_KEY="..."
+export BINANCE_SECRET="..."
+
+cd /hedging/app
+python live_example.py \
+  --symbol=SOLUSDC \
+  --mode=both \
+  --quote=500 \
+  --trigger-long-pct=0.05 --trigger-short-pct=0.05 \
+  --target-long-pct=0.15 --target-short-pct=0.15
+```
+
+Скрипт будет печатать JSON-снапшоты статуса при каждом изменении `mutation_counter`.
+
+
+Проверка импорта:
+
+```bash
+python -c "import live; print(live.__file__)"
+```
+
+---
+
+## Требования и переменные окружения
+
+- Python 3.10+
+- Env:
+  - `BINANCE_KEY`
+  - `BINANCE_SECRET`
+  - `LOG_LEVEL` (опционально)
+
+---
+
+## Как импортировать “извне” и запустить хэдж (пример кода)
+
+Ниже — минимальный запуск `HedgeEngine` “как библиотеку”, по мотивам `live/examples/hedge_example.py`.
+
+```python
+import os
+import time
+
+from live.exchanges.exchange_factory import get_exchange_class, get_realtime_class
+from live.logic.hedging import HedgeEngine
+from live.logic.models import (
+    HedgeConfig,
+    HedgeMode,
+    HedgeExecutionParams,
+    HedgeOffsetsPctX10000,
+    HedgeVolumeRequest,
+)
+
+
+def run():
+    key = os.environ["BINANCE_KEY"]
+    secret = os.environ["BINANCE_SECRET"]
+
+    ExchangeClass = get_exchange_class("Binance")
+    RealtimeClass = get_realtime_class("Binance")
+
+    # Важно: Position/HedgeEngine работают в one-way, поэтому hedge_mode=False
+    exchange = ExchangeClass(key=key, secret=secret, hedge_mode=False, is_realtime=True)
+
+    rt = RealtimeClass()
+    rt.start()
+
+    exchange.wait_for_connect(timeout=60)
+    rt.wait_for_connect(timeout=60)
+
+    symbol = "SOLUSDC"
+    rules = exchange.get_rules()
+    rule = rules[symbol]
+
+    quote_notional = 500.0
+
+    def on_volume(req: HedgeVolumeRequest) -> int:
+        price_float = float(int(req.price_units)) * float(rule.price_step)
+        base_volume_float = float(quote_notional) / float(price_float)
+        base_units = int(base_volume_float / float(rule.lot_step))
+        if base_units <= 0:
+            raise RuntimeError(f"on_volume: bad base_units={base_units}")
+        return int(base_units)
+
+    # offsets: pct * 10000 (пример: 0.05% => 0.05 * 10000 = 500)
+    trigger_pct = 0.05
+    target_pct = 0.15
+
+    cfg = HedgeConfig(
+        hedge_id=str(int(time.time() * 1000)),
+        symbol=symbol,
+        hedge_mode=HedgeMode.BOTH,
+        trigger_offset_pct_x10000=HedgeOffsetsPctX10000(
+            long=int(round(trigger_pct * 10000.0)),
+            short=int(round(trigger_pct * 10000.0)),
+        ),
+        target_offset_pct_x10000=HedgeOffsetsPctX10000(
+            long=int(round(target_pct * 10000.0)),
+            short=int(round(target_pct * 10000.0)),
+        ),
+        execution_params=HedgeExecutionParams(
+            tick_ms=5,
+            gtx_cooldown_ms=5,
+            entrance_timeout_ms=60_000,
+        ),
+    )
+
+    hedge = HedgeEngine(config=cfg, exchange=exchange, realtime=rt, on_volume=on_volume)
+    hedge.start()
+
+    try:
+        last_mc = -1
+        while True:
+            hedge.check()
+            snap = hedge.status()
+            if int(snap.mutation_counter) != int(last_mc):
+                last_mc = int(snap.mutation_counter)
+                print(hedge.status_json().decode("utf-8"))
+            time.sleep(0.05)
+    finally:
+        if bool(hedge.started):
+            hedge.stop()
+        rt.stop()
+        exchange.stop()
+
+
+if __name__ == "__main__":
+    run()
+```

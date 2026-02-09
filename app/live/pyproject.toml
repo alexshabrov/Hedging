@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hedgingbt-live"
+version = "0.1.0"
+description = "Hedging live-trading runtime (import package: live)"
+readme = { file = "README", content-type = "text/plain" }
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+
+dependencies = [
+  "orjson",
+  "pydantic>=2.2.0",
+  "requests",
+  "websocket-client",
+]
+
+[tool.setuptools]
+package-dir = { "live" = "." }
+
+packages = [
+  "live",
+  "live.examples",
+  "live.exchanges",
+  "live.exchanges.binance",
+  "live.lib",
+  "live.logic",
+]
+

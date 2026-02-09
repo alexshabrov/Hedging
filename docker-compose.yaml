@@ -1,0 +1,15 @@
+services:
+  hedging:
+    volumes:
+      - ./:/hedging
+      - /hedging_data/:/_data 
+    build: .
+    env_file:
+      - .env
+    ########
+    networks:
+      - nginx-common
+
+networks:
+  nginx-common:
+    external: true

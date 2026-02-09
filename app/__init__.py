@@ -1,0 +1,4 @@
+"""
+Hedging application package marker.
+"""
+

@@ -1,0 +1,17 @@
+{
+  "description": "Fixed volumes with 1 unit thresholds (separate sides) (v2)",
+  "test_volume_usd": [10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000],
+  "max_time_ms": 10000,
+  "network_delay_ms": 110,
+  "distance_steps": 1,
+  "threshold_as_perc": false,
+  "d_top_threshold": 1,
+  "d_btm_threshold": 1,
+  "d_top_target_perc": { "min": 0.5, "max": 10.0, "step": 0.5 },
+  "d_btm_target_perc": { "min": 0.5, "max": 10.0, "step": 0.5 },
+  "tf_ms": 300000,
+  "period": 30,
+  "only_side": [-1, 1],
+  "entrance_timeout_ms": 300000
+}
+
