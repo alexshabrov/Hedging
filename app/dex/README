@@ -26,7 +26,7 @@
 
 ### `dex/models/*` — модели
 
-- **`dex_models.py`**
+- **`realtime_models.py`**
   - `SwapsRealtimeConfig`, `SwapEvent`, ABI-структуры.
 
 ### `dex/lib/*` — инфраструктура

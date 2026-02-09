@@ -10,6 +10,7 @@ from dex.lib.strict_model import StrictModel
 # Enums
 class DexEventType(Enum):
     SWAP = 'swap'
+    PRICE = 'price'
 
 # ABI models
 class SwapEventAbiInput(StrictModel):
@@ -129,4 +130,58 @@ class SwapEvent(StrictModel):
             tick=int(data['tick']),
             data=str(data['data']),
             topics=list(data['topics']),
+        )
+
+# Price event model
+class PriceEvent(StrictModel):
+    event_type: DexEventType
+    pool_address: str
+    token0_address: str
+    token1_address: str
+    decimals0: int
+    decimals1: int
+    block_number: int
+    tx_hash: str
+    log_index: int
+    sqrt_price_x96: int
+    tick: int
+    price_token1_per_token0: float
+    price_token0_per_token1: float
+    traditional_price: float
+
+    def model_dump(self) -> dict:  # type: ignore[override]
+        return {
+            'event_type': self.event_type.value,
+            'pool_address': self.pool_address,
+            'token0_address': self.token0_address,
+            'token1_address': self.token1_address,
+            'decimals0': self.decimals0,
+            'decimals1': self.decimals1,
+            'block_number': self.block_number,
+            'tx_hash': self.tx_hash,
+            'log_index': self.log_index,
+            'sqrt_price_x96': self.sqrt_price_x96,
+            'tick': self.tick,
+            'price_token1_per_token0': self.price_token1_per_token0,
+            'price_token0_per_token1': self.price_token0_per_token1,
+            'traditional_price': self.traditional_price,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'PriceEvent':
+        return cls(
+            event_type=DexEventType(str(data['event_type'])),
+            pool_address=str(data['pool_address']),
+            token0_address=str(data['token0_address']),
+            token1_address=str(data['token1_address']),
+            decimals0=int(data['decimals0']),
+            decimals1=int(data['decimals1']),
+            block_number=int(data['block_number']),
+            tx_hash=str(data['tx_hash']),
+            log_index=int(data['log_index']),
+            sqrt_price_x96=int(data['sqrt_price_x96']),
+            tick=int(data['tick']),
+            price_token1_per_token0=float(data['price_token1_per_token0']),
+            price_token0_per_token1=float(data['price_token0_per_token1']),
+            traditional_price=float(data['traditional_price']),
         )

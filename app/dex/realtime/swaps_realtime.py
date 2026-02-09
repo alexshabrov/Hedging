@@ -7,7 +7,7 @@ import time, traceback, json
 from typing import Callable, Optional, List
 from dex.lib.logger import get_logger
 from dex.lib.ws_client import WsClient
-from dex.models.dex_models import DexEventType, SwapEvent, SwapsRealtimeConfig
+from dex.models.realtime_models import DexEventType, SwapEvent, SwapsRealtimeConfig
 
 # Swaps realtime
 class SwapsRealtime:

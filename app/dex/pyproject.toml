@@ -12,6 +12,7 @@ license = { text = "Proprietary" }
 
 dependencies = [
   "pydantic>=2.2.0",
+  "web3",
   "websocket-client",
 ]
 
@@ -20,6 +21,7 @@ package-dir = { "dex" = "." }
 
 packages = [
   "dex",
+  "dex.contract",
   "dex.examples",
   "dex.exchanges",
   "dex.lib",
