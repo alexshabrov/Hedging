@@ -620,7 +620,7 @@ class ContractWrapper:
             else:
                 fg_inside_x128 = int(fg_global_x128) - int(fg_out_lower_x128) - int(fg_out_upper_x128)
 
-            delta = int(fg_inside_x128) - int(fg_inside_last_x128)
+            delta = (int(fg_inside_x128) - int(fg_inside_last_x128)) % (2 ** 256)
             return float(liq) * float(delta) / float(q128) / float(10 ** decimals)
 
         uncollected0 = _calc_fee_owed(
@@ -634,6 +634,17 @@ class ContractWrapper:
             fee_growth_global1_x128, tick_lower_data[3], tick_upper_data[3],
             fee_growth_inside1_last_x128, token1_decimals
         ) + float(tokens_owed1) / float(10 ** token1_decimals)
+
+        if str(self._base_token_address).lower() == str(token0).lower():
+            amount_base = float(amount0_norm)
+            amount_quote = float(amount1_norm)
+            uncollected_base = float(uncollected0)
+            uncollected_quote = float(uncollected1)
+        else:
+            amount_base = float(amount1_norm)
+            amount_quote = float(amount0_norm)
+            uncollected_base = float(uncollected1)
+            uncollected_quote = float(uncollected0)
 
         return PositionState(
             token0=str(token0),
@@ -649,6 +660,10 @@ class ContractWrapper:
             amount1=float(amount1_norm),
             uncollected0=float(uncollected0),
             uncollected1=float(uncollected1),
+            amount_base=float(amount_base),
+            amount_quote=float(amount_quote),
+            uncollected_base=float(uncollected_base),
+            uncollected_quote=float(uncollected_quote),
         )
 
     def decrease_liquidity(self, token_id: int, liquidity_percent: int = 100,

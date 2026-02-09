@@ -84,6 +84,10 @@ class PositionState(StrictModel):
     amount1: float
     uncollected0: float
     uncollected1: float
+    amount_base: float
+    amount_quote: float
+    uncollected_base: float
+    uncollected_quote: float
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
@@ -100,6 +104,10 @@ class PositionState(StrictModel):
             'amount1': self.amount1,
             'uncollected0': self.uncollected0,
             'uncollected1': self.uncollected1,
+            'amount_base': self.amount_base,
+            'amount_quote': self.amount_quote,
+            'uncollected_base': self.uncollected_base,
+            'uncollected_quote': self.uncollected_quote,
         }
 
     @classmethod
@@ -118,4 +126,8 @@ class PositionState(StrictModel):
             amount1=float(data['amount1']),
             uncollected0=float(data['uncollected0']),
             uncollected1=float(data['uncollected1']),
+            amount_base=float(data['amount_base']),
+            amount_quote=float(data['amount_quote']),
+            uncollected_base=float(data['uncollected_base']),
+            uncollected_quote=float(data['uncollected_quote']),
         )
