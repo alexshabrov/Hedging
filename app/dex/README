@@ -1,0 +1,55 @@
+Запуск примера:
+  > python -m dex.examples.swaps_realtime_example --ws-url=wss://arbitrum-mainnet.infura.io/ws/v3/<API_KEY> --pool-address=0x... --seconds=60
+
+---
+
+## `dex` — runtime для DEX realtime
+
+Пакет `dex` — автономный слой для **реального потока DEX событий** (Uniswap V3 swaps) поверх WebSocket RPC.
+
+Ключевые принципы:
+- **StrictModel + Enum**: все публичные схемы — `pydantic` с `strict=True` и `extra=forbid` (см. `lib/strict_model.py`).
+- **Без молчаливых фолбэков**: любые несоответствия входным данным приводят к исключению.
+- **Стандартный json**: сериализация/десериализация через `json`.
+- **Строгие проверки формата**: адреса и hex-значения валидируются по длине и форме.
+
+---
+
+## Архитектура и компоненты (кратко)
+
+### `dex/realtime/*` — realtime слой
+
+- **`swaps_realtime.py`**
+  - WebSocket подписка на `eth_subscribe`/`logs` для Uniswap V3 Swap.
+  - Декодинг события вручную по спецификации: `topics` + `data`.
+  - Выдаёт `SwapEvent` через callback.
+
+### `dex/models/*` — модели
+
+- **`dex_models.py`**
+  - `SwapsRealtimeConfig`, `SwapEvent`, ABI-структуры.
+
+### `dex/lib/*` — инфраструктура
+
+- `strict_model.py`: базовый `StrictModel`.
+- `ws_client.py`: WS клиент с reconnect и retry-очередью.
+- `logger.py`: логгер с микросекундами (уровень через `LOG_LEVEL`).
+
+---
+
+## Установка как пакета
+
+### Вариант A: editable из корня репозитория
+
+```bash
+python -m pip install -U pip
+python -m pip install -e app/dex
+```
+
+### Вариант B: editable прямо из папки `app/dex`
+
+```bash
+cd mimir/trading/Hedging/app/dex
+python -m pip install -e .
+```
+

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hedgingbt-dex"
+version = "0.1.0"
+description = "DEX runtime (import package: dex)"
+readme = { file = "README", content-type = "text/plain" }
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+
+dependencies = [
+  "pydantic>=2.2.0",
+  "websocket-client",
+]
+
+[tool.setuptools]
+package-dir = { "dex" = "." }
+
+packages = [
+  "dex",
+  "dex.examples",
+  "dex.exchanges",
+  "dex.lib",
+  "dex.logic",
+  "dex.models",
+  "dex.realtime",
+]
