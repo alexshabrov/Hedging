@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from web3 import Web3
 from dex.lib.logger import get_logger
 from dex.models.realtime_models import DexEventType, PriceEvent, SwapEvent
-from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PairInfo, PositionState
+from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PositionState
 from dex.contract.params import Params
 from dex.contract.pool_calc import split_capital_into_tokens
 
@@ -243,31 +243,45 @@ class ContractWrapper:
 
         return str(pair).upper() == str(self._pair_name).upper()
 
-    def get_pair_info(self) -> PairInfo:
-        if self._token0_address is None or self._token1_address is None:
-            raise RuntimeError('token addresses are not initialized')
-        if self._base_token_address is None or self._quote_token_address is None:
-            raise RuntimeError('base/quote addresses are not initialized')
+    def get_token0_address(self) -> str:
+        if self._token0_address is None:
+            raise RuntimeError('token0 is not initialized')
+        return str(self._token0_address)
 
-        token0_symbol = self._get_symbol(self._token0_address)
-        token1_symbol = self._get_symbol(self._token1_address)
-        base_symbol = self._get_symbol(self._base_token_address)
-        quote_symbol = self._get_symbol(self._quote_token_address)
-        token0_decimals = self._get_decimals(self._token0_address)
-        token1_decimals = self._get_decimals(self._token1_address)
+    def get_token1_address(self) -> str:
+        if self._token1_address is None:
+            raise RuntimeError('token1 is not initialized')
+        return str(self._token1_address)
 
-        return PairInfo(
-            token0_address=str(self._token0_address),
-            token1_address=str(self._token1_address),
-            base_token_address=str(self._base_token_address),
-            quote_token_address=str(self._quote_token_address),
-            token0_symbol=str(token0_symbol),
-            token1_symbol=str(token1_symbol),
-            base_symbol=str(base_symbol),
-            quote_symbol=str(quote_symbol),
-            token0_decimals=int(token0_decimals),
-            token1_decimals=int(token1_decimals),
-        )
+    def get_base_token_address(self) -> str:
+        if self._base_token_address is None:
+            raise RuntimeError('base token is not initialized')
+        return str(self._base_token_address)
+
+    def get_quote_token_address(self) -> str:
+        if self._quote_token_address is None:
+            raise RuntimeError('quote token is not initialized')
+        return str(self._quote_token_address)
+
+    def get_token0_decimals(self) -> int:
+        if self._token0_address is None:
+            raise RuntimeError('token0 is not initialized')
+        return int(self._get_decimals(self._token0_address))
+
+    def get_token1_decimals(self) -> int:
+        if self._token1_address is None:
+            raise RuntimeError('token1 is not initialized')
+        return int(self._get_decimals(self._token1_address))
+
+    def get_token0_symbol(self) -> str:
+        if self._token0_address is None:
+            raise RuntimeError('token0 is not initialized')
+        return str(self._get_symbol(self._token0_address))
+
+    def get_token1_symbol(self) -> str:
+        if self._token1_address is None:
+            raise RuntimeError('token1 is not initialized')
+        return str(self._get_symbol(self._token1_address))
 
     def get_current_traditional_price(self) -> float:
         return float(self._get_current_traditional_price())

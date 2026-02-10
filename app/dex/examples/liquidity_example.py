@@ -42,9 +42,14 @@ def main():
         wallet_address=str(wallet_address) if wallet_address is not None else None,
     )
 
-    pair_info = cw.get_pair_info()
-    init_balance0_raw = cw.get_balance(str(pair_info.token0_address))
-    init_balance1_raw = cw.get_balance(str(pair_info.token1_address))
+    token0_address = cw.get_token0_address()
+    token1_address = cw.get_token1_address()
+    quote_address = cw.get_quote_token_address()
+    token0_decimals = cw.get_token0_decimals()
+    token1_decimals = cw.get_token1_decimals()
+
+    init_balance0_raw = cw.get_balance(str(token0_address))
+    init_balance1_raw = cw.get_balance(str(token1_address))
 
     swapper_config = CowSwapConfig(
         swapper_type=SwapperType.COW_SWAP,
@@ -116,32 +121,32 @@ def main():
                 if len(parts) != 1:
                     raise RuntimeError('REBALANCE does not accept arguments')
 
-                balance0_raw = cw.get_balance(str(pair_info.token0_address))
-                balance1_raw = cw.get_balance(str(pair_info.token1_address))
+                balance0_raw = cw.get_balance(str(token0_address))
+                balance1_raw = cw.get_balance(str(token1_address))
                 current_price = cw.get_current_traditional_price()
 
-                quote_address = str(pair_info.quote_token_address).lower()
-                token0_address = str(pair_info.token0_address).lower()
-                token1_address = str(pair_info.token1_address).lower()
+                token0_address = str(token0_address).lower()
+                token1_address = str(token1_address).lower()
+                quote_address = str(quote_address).lower()
 
                 if quote_address == token0_address:
-                    quote_decimals = int(pair_info.token0_decimals)
-                    base_decimals = int(pair_info.token1_decimals)
+                    quote_decimals = int(token0_decimals)
+                    base_decimals = int(token1_decimals)
                     quote_now_raw = int(balance0_raw)
                     base_now_raw = int(balance1_raw)
                     quote_init_raw = int(init_balance0_raw)
                     base_init_raw = int(init_balance1_raw)
-                    quote_address_now = str(pair_info.token0_address)
-                    base_address_now = str(pair_info.token1_address)
+                    quote_address_now = str(token0_address)
+                    base_address_now = str(token1_address)
                 elif quote_address == token1_address:
-                    quote_decimals = int(pair_info.token1_decimals)
-                    base_decimals = int(pair_info.token0_decimals)
+                    quote_decimals = int(token1_decimals)
+                    base_decimals = int(token0_decimals)
                     quote_now_raw = int(balance1_raw)
                     base_now_raw = int(balance0_raw)
                     quote_init_raw = int(init_balance1_raw)
                     base_init_raw = int(init_balance0_raw)
-                    quote_address_now = str(pair_info.token1_address)
-                    base_address_now = str(pair_info.token0_address)
+                    quote_address_now = str(token1_address)
+                    base_address_now = str(token0_address)
                 else:
                     raise RuntimeError('quote token does not match pool tokens')
 
