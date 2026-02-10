@@ -66,7 +66,7 @@ def main():
     def _dump(data: dict) -> str:
         return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode('utf-8')
 
-    logger.info('Commands: ADD <price_lower> <price_upper> <total_quote> | STATE <token_id> | REMOVE <token_id> | COLLECT <token_id> | REBALANCE | HELP')
+    logger.info('Commands: ADD <price_lower|-> <price_upper|-> <total_quote> | STATE <token_id> | REMOVE <token_id> | COLLECT <token_id> | REBALANCE | HELP')
 
     while True:
         cmd = input().strip()
@@ -78,19 +78,19 @@ def main():
             action = parts[0].upper()
 
             if action == 'HELP':
-                logger.info('Commands: ADD <price_lower> <price_upper> <total_quote> | STATE <token_id> | REMOVE <token_id> | COLLECT <token_id> | REBALANCE | HELP')
+                logger.info('Commands: ADD <price_lower|-> <price_upper|-> <total_quote> | STATE <token_id> | REMOVE <token_id> | COLLECT <token_id> | REBALANCE | HELP')
                 continue
 
             if action == 'ADD':
                 if len(parts) != 4:
                     raise RuntimeError('ADD requires price_lower price_upper total_quote')
-                price_lower = float(parts[1])
-                price_upper = float(parts[2])
+                price_lower = None if str(parts[1]).strip() == '-' else float(parts[1])
+                price_upper = None if str(parts[2]).strip() == '-' else float(parts[2])
                 total_quote = float(parts[3])
                 result = cw.add_liquidity_traditional(
                     fee_pct=float(args.fee_pct),
-                    price_lower=float(price_lower),
-                    price_upper=float(price_upper),
+                    price_lower=price_lower,
+                    price_upper=price_upper,
                     total_quote=float(total_quote),
                 )
                 logger.info(f'ADD result: {_dump(result.model_dump())}')

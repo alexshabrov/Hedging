@@ -353,8 +353,9 @@ class ContractWrapper:
         return float(price_token0_per_token1)
 
     # ----------------------------------------------------------------------
-    def add_liquidity_traditional(self, fee_pct: float, price_lower: float, price_upper: float,
-                                  total_quote: float, recipient: Optional[str] = None) -> dict:
+    def add_liquidity_traditional(self, fee_pct: float, total_quote: float,
+                                  price_lower: Optional[float] = None,
+                                  price_upper: Optional[float] = None) -> dict:
         if self._wallet_address is None:
             raise RuntimeError('wallet_address is not set')
         if self._private_key is None:
@@ -363,18 +364,42 @@ class ContractWrapper:
             raise RuntimeError('fee_pct is not number')
         if float(fee_pct) <= 0:
             raise RuntimeError('fee_pct must be > 0')
+        if float(total_quote) <= 0:
+            raise RuntimeError('total_quote must be > 0')
+
+
+        fee = int(round(float(fee_pct) * 10000))
+        tick_spacing = self._get_tick_spacing(fee)
+
+        current_price = self._get_current_traditional_price()
+        if float(current_price) <= 0:
+            raise RuntimeError('current_price must be > 0')
+
+        if price_lower is None and price_upper is None:
+            raise RuntimeError('price bounds are empty')
+
+        if price_lower is None:
+            if not isinstance(price_upper, float) and not isinstance(price_upper, int):
+                raise RuntimeError('price_upper is not number')
+            if float(price_upper) <= float(current_price):
+                raise RuntimeError('price_upper must be > current_price for one-sided lower')
+            price_lower = float(current_price)
+
+        if price_upper is None:
+            if not isinstance(price_lower, float) and not isinstance(price_lower, int):
+                raise RuntimeError('price_lower is not number')
+            if float(price_lower) >= float(current_price):
+                raise RuntimeError('price_lower must be < current_price for one-sided upper')
+            price_upper = float(current_price)
+
+        if not isinstance(price_lower, float) and not isinstance(price_lower, int):
+            raise RuntimeError('price_lower is not number')
+        if not isinstance(price_upper, float) and not isinstance(price_upper, int):
+            raise RuntimeError('price_upper is not number')
         if float(price_lower) <= 0 or float(price_upper) <= 0:
             raise RuntimeError('price bounds must be > 0')
         if float(price_lower) >= float(price_upper):
             raise RuntimeError('price_lower must be < price_upper')
-        if float(total_quote) <= 0:
-            raise RuntimeError('total_quote must be > 0')
-
-        if recipient is None:
-            recipient = str(self._wallet_address)
-
-        fee = int(round(float(fee_pct) * 10000))
-        tick_spacing = self._get_tick_spacing(fee)
 
         price_lower_pool = self._traditional_to_pool_price(float(price_lower))
         price_upper_pool = self._traditional_to_pool_price(float(price_upper))
@@ -388,7 +413,6 @@ class ContractWrapper:
         if tick_lower >= tick_upper:
             raise RuntimeError('tick_lower must be < tick_upper')
 
-        current_price = self._get_current_traditional_price()
         amount_base, amount_quote, l_val = split_capital_into_tokens(
             total_quote=float(total_quote),
             price=float(current_price),
@@ -396,7 +420,9 @@ class ContractWrapper:
             price_upper=float(price_upper),
         )
 
-        if float(amount_base) <= 0 or float(amount_quote) <= 0:
+        if float(amount_base) < 0 or float(amount_quote) < 0:
+            raise RuntimeError('amounts must be >= 0')
+        if float(amount_base) == 0 and float(amount_quote) == 0:
             raise RuntimeError('amounts must be > 0')
 
         amount0_desired, amount1_desired = self._map_amounts(amount_base, amount_quote)
@@ -428,7 +454,7 @@ class ContractWrapper:
             "amount1Desired": amount1_wei,
             "amount0Min": 0,
             "amount1Min": 0,
-            "recipient": self._to_checksum_address(str(recipient)),
+            "recipient": self._to_checksum_address(str(self._wallet_address)),
             "deadline": int(deadline),
         }
 
