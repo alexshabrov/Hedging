@@ -375,17 +375,20 @@ class ContractWrapper:
         if float(current_price) <= 0:
             raise RuntimeError('current_price must be > 0')
 
-        if price_lower is None and price_upper is None:
+        is_lower_auto = price_lower is None
+        is_upper_auto = price_upper is None
+
+        if is_lower_auto and is_upper_auto:
             raise RuntimeError('price bounds are empty')
 
-        if price_lower is None:
+        if is_lower_auto:
             if not isinstance(price_upper, float) and not isinstance(price_upper, int):
                 raise RuntimeError('price_upper is not number')
             if float(price_upper) <= float(current_price):
                 raise RuntimeError('price_upper must be > current_price for one-sided lower')
             price_lower = float(current_price)
 
-        if price_upper is None:
+        if is_upper_auto:
             if not isinstance(price_lower, float) and not isinstance(price_lower, int):
                 raise RuntimeError('price_lower is not number')
             if float(price_lower) >= float(current_price):
@@ -407,15 +410,37 @@ class ContractWrapper:
         tick_lower_raw = self._price_to_tick(price_lower_pool)
         tick_upper_raw = self._price_to_tick(price_upper_pool)
 
-        tick_lower = self._align_tick_down(tick_lower_raw, tick_spacing)
-        tick_upper = self._align_tick_up(tick_upper_raw, tick_spacing)
+        if is_lower_auto:
+            tick_lower = self._align_tick_up(tick_lower_raw, tick_spacing)
+        else:
+            tick_lower = self._align_tick_down(tick_lower_raw, tick_spacing)
+
+        if is_upper_auto:
+            tick_upper = self._align_tick_down(tick_upper_raw, tick_spacing)
+        else:
+            tick_upper = self._align_tick_up(tick_upper_raw, tick_spacing)
 
         if tick_lower >= tick_upper:
             raise RuntimeError('tick_lower must be < tick_upper')
 
+        token0_decimals = self._get_decimals(self._token0_address)
+        token1_decimals = self._get_decimals(self._token1_address)
+
+        price_lower_pool = (1.0001 ** int(tick_lower)) * (10 ** (token0_decimals - token1_decimals))
+        price_upper_pool = (1.0001 ** int(tick_upper)) * (10 ** (token0_decimals - token1_decimals))
+
+        price_lower = float(self._pool_to_traditional_price(price_lower_pool))
+        price_upper = float(self._pool_to_traditional_price(price_upper_pool))
+
+        price_for_calc = float(current_price)
+        if bool(is_lower_auto) and float(price_lower) > float(current_price):
+            price_for_calc = float(price_lower)
+        if bool(is_upper_auto) and float(price_upper) < float(current_price):
+            price_for_calc = float(price_upper)
+
         amount_base, amount_quote, l_val = split_capital_into_tokens(
             total_quote=float(total_quote),
-            price=float(current_price),
+            price=float(price_for_calc),
             price_lower=float(price_lower),
             price_upper=float(price_upper),
         )
@@ -426,9 +451,6 @@ class ContractWrapper:
             raise RuntimeError('amounts must be > 0')
 
         amount0_desired, amount1_desired = self._map_amounts(amount_base, amount_quote)
-        token0_decimals = self._get_decimals(self._token0_address)
-        token1_decimals = self._get_decimals(self._token1_address)
-
         amount0_wei = int(Decimal(amount0_desired) * (Decimal(10) ** Decimal(token0_decimals)))
         amount1_wei = int(Decimal(amount1_desired) * (Decimal(10) ** Decimal(token1_decimals)))
 
@@ -591,7 +613,17 @@ class ContractWrapper:
         })
 
         signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
-        self._w3.eth.send_raw_transaction(signed.raw_transaction)
+        tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
+        if not bool(receipt.status):
+            raise RuntimeError('approve failed')
+
+        allowance = erc20.functions.allowance(
+            self._wallet_address,
+            self._npm_address,
+        ).call()
+        if int(allowance) < int(amount):
+            raise RuntimeError('approve did not increase allowance')
 
     def get_balance(self, token_address: str) -> int:
         erc20 = self._w3.eth.contract(
