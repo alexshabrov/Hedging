@@ -69,6 +69,42 @@ ERC20_BALANCE_ABI = [
     }
 ]
 
+ERC20_ALLOWANCE_ABI = [
+    {
+        'constant': True,
+        'inputs': [
+            {'name': '_owner', 'type': 'address'},
+            {'name': '_spender', 'type': 'address'},
+        ],
+        'name': 'allowance',
+        'outputs': [{'name': 'remaining', 'type': 'uint256'}],
+        'type': 'function',
+    }
+]
+
+ERC20_APPROVE_ABI = [
+    {
+        'constant': False,
+        'inputs': [
+            {'name': '_spender', 'type': 'address'},
+            {'name': '_value', 'type': 'uint256'},
+        ],
+        'name': 'approve',
+        'outputs': [{'name': 'success', 'type': 'bool'}],
+        'type': 'function',
+    }
+]
+
+# Vault relayer
+VAULT_RELAYER_MAP = {
+    'mainnet': '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    'ethereum': '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    'arbitrum': '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    'sepolia': '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    'polygon': '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    'base': '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+}
+
 # Swapper
 class CowSwapSwapper(SwapperInterface):
     def __init__(self, config: CowSwapConfig) -> None:
@@ -127,6 +163,8 @@ class CowSwapSwapper(SwapperInterface):
         self._api_base = COW_API_BASE[self._network]
 
         self._stable_addresses = self._load_stable_addresses()
+        self._vault_relayer = self._init_vault_relayer()
+        self._event_loop = asyncio.get_event_loop_policy().new_event_loop()
 
     def _load_stable_addresses(self) -> list:
         networks = Params.NETWORKS
@@ -145,6 +183,11 @@ class CowSwapSwapper(SwapperInterface):
                 raise RuntimeError(f'stable address is empty for {self._network}')
             stable_list.append(str(self._to_checksum_address(str(addr))).lower())
         return stable_list
+
+    def _init_vault_relayer(self) -> str:
+        if self._network not in VAULT_RELAYER_MAP:
+            raise RuntimeError(f'VaultRelayer not configured for {self._network}')
+        return str(self._to_checksum_address(str(VAULT_RELAYER_MAP[self._network])))
 
     def _to_checksum_address(self, address: str) -> str:
         if not isinstance(address, str) or len(address) == 0:
@@ -187,6 +230,41 @@ class CowSwapSwapper(SwapperInterface):
         token_address = self._to_checksum_address(token_address)
         erc20 = self._w3.eth.contract(address=token_address, abi=ERC20_BALANCE_ABI)
         return int(erc20.functions.balanceOf(self._wallet_address).call())
+
+    def _get_allowance(self, token_address: str) -> int:
+        token_address = self._to_checksum_address(token_address)
+        erc20 = self._w3.eth.contract(address=token_address, abi=ERC20_ALLOWANCE_ABI)
+        return int(erc20.functions.allowance(self._wallet_address, self._vault_relayer).call())
+
+    def _approve(self, token_address: str, amount: int) -> None:
+        token_address = self._to_checksum_address(token_address)
+        erc20 = self._w3.eth.contract(address=token_address, abi=ERC20_APPROVE_ABI)
+
+        nonce = self._w3.eth.get_transaction_count(self._wallet_address)
+        base_fee = self._w3.eth.get_block('latest')['baseFeePerGas']
+        max_priority_fee = self._w3.to_wei(0.1, 'gwei')
+        max_fee_per_gas = int(base_fee) + int(max_priority_fee)
+
+        tx = erc20.functions.approve(self._vault_relayer, int(amount)).build_transaction({
+            'from': self._wallet_address,
+            'nonce': nonce,
+            'gas': 60000,
+            'maxFeePerGas': max_fee_per_gas,
+            'maxPriorityFeePerGas': max_priority_fee,
+            'type': 2,
+        })
+
+        signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
+        tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash)
+        if not bool(receipt.status):
+            raise RuntimeError('approve failed')
+
+    def _ensure_allowance(self, token_address: str, amount: int) -> None:
+        current = self._get_allowance(token_address)
+        if int(current) >= int(amount):
+            return
+        self._approve(token_address, int(amount))
 
     def _get_token_info(self, token_address: str) -> TokenInfo:
         addr = self._to_checksum_address(token_address)
@@ -327,7 +405,7 @@ class CowSwapSwapper(SwapperInterface):
         return self._parse_order_data(data)
 
     def _place_swap_sync(self, sell_token: str, buy_token: str, amount_raw: int) -> Tuple[str, str]:
-        loop = asyncio.get_event_loop_policy().new_event_loop()
+        loop = self._event_loop
         try:
             asyncio.set_event_loop(loop)
             result = loop.run_until_complete(
@@ -340,7 +418,6 @@ class CowSwapSwapper(SwapperInterface):
                 )
             )
         finally:
-            loop.close()
             asyncio.set_event_loop(None)
 
         if result is None:
@@ -436,6 +513,7 @@ class CowSwapSwapper(SwapperInterface):
                 order=None,
             )
 
+        self._ensure_allowance(sell_info.address, int(amount_raw))
         uid, url = self._place_swap_sync(sell_info.address, buy_info.address, amount_raw)
         order_data, elapsed_sec = self._wait_for_order(uid, int(request.wait_timeout_sec), int(request.poll_interval_sec))
 
