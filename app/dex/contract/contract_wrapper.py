@@ -439,6 +439,23 @@ class ContractWrapper:
             raise RuntimeError(f'Insufficient balance: balance0={balance0} need0={amount0_wei} '
                                f'balance1={balance1} need1={amount1_wei}')
 
+        allowance0 = self._get_allowance(self._token0_address)
+        allowance1 = self._get_allowance(self._token1_address)
+        self._logger.info(
+            f'MINT_DEBUG: fee={fee} tick_spacing={tick_spacing} '
+            f'tick_lower_raw={tick_lower_raw} tick_upper_raw={tick_upper_raw} '
+            f'tick_lower={tick_lower} tick_upper={tick_upper} '
+            f'price_lower={price_lower} price_upper={price_upper} current_price={current_price} '
+            f'amount_base={amount_base} amount_quote={amount_quote} '
+            f'amount0_desired={amount0_desired} amount1_desired={amount1_desired} '
+            f'amount0_wei={amount0_wei} amount1_wei={amount1_wei} '
+            f'token0_decimals={token0_decimals} token1_decimals={token1_decimals} '
+            f'balance0={balance0} balance1={balance1} '
+            f'allowance0={allowance0} allowance1={allowance1} '
+            f'token0={self._token0_address} token1={self._token1_address} '
+            f'base={self._base_token_address} quote={self._quote_token_address}'
+        )
+
         self._approve_token(self._token0_address, amount0_wei)
         self._approve_token(self._token1_address, amount1_wei)
 
@@ -468,6 +485,7 @@ class ContractWrapper:
             })
             gas_limit = int(gas_estimate * 1.2)
         except Exception as e:
+            self._logger.error(f'MINT_GAS_ESTIMATE_ERROR: params={mint_params} error={e}')
             raise RuntimeError(f'Gas estimation failed: {e}')
 
         base_fee = self._w3.eth.get_block("latest")["baseFeePerGas"]
@@ -581,6 +599,15 @@ class ContractWrapper:
             abi=self._erc20_abi,
         )
         return int(erc20.functions.balanceOf(self._wallet_address).call())
+
+    def _get_allowance(self, token_address: str) -> int:
+        if self._npm_address is None:
+            raise RuntimeError('npm address is not initialized')
+        erc20 = self._w3.eth.contract(
+            address=self._to_checksum_address(token_address),
+            abi=self._erc20_abi,
+        )
+        return int(erc20.functions.allowance(self._wallet_address, self._npm_address).call())
 
     def _map_amounts(self, amount_base: float, amount_quote: float) -> tuple:
         if str(self._base_token_address).lower() == str(self._token0_address).lower():
