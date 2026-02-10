@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from web3 import Web3
 from dex.lib.logger import get_logger
 from dex.models.realtime_models import DexEventType, PriceEvent, SwapEvent
-from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PositionState
+from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PairInfo, PositionState
 from dex.contract.params import Params
 from dex.contract.pool_calc import split_capital_into_tokens
 
@@ -243,6 +243,35 @@ class ContractWrapper:
 
         return str(pair).upper() == str(self._pair_name).upper()
 
+    def get_pair_info(self) -> PairInfo:
+        if self._token0_address is None or self._token1_address is None:
+            raise RuntimeError('token addresses are not initialized')
+        if self._base_token_address is None or self._quote_token_address is None:
+            raise RuntimeError('base/quote addresses are not initialized')
+
+        token0_symbol = self._get_symbol(self._token0_address)
+        token1_symbol = self._get_symbol(self._token1_address)
+        base_symbol = self._get_symbol(self._base_token_address)
+        quote_symbol = self._get_symbol(self._quote_token_address)
+        token0_decimals = self._get_decimals(self._token0_address)
+        token1_decimals = self._get_decimals(self._token1_address)
+
+        return PairInfo(
+            token0_address=str(self._token0_address),
+            token1_address=str(self._token1_address),
+            base_token_address=str(self._base_token_address),
+            quote_token_address=str(self._quote_token_address),
+            token0_symbol=str(token0_symbol),
+            token1_symbol=str(token1_symbol),
+            base_symbol=str(base_symbol),
+            quote_symbol=str(quote_symbol),
+            token0_decimals=int(token0_decimals),
+            token1_decimals=int(token1_decimals),
+        )
+
+    def get_current_traditional_price(self) -> float:
+        return float(self._get_current_traditional_price())
+
     # ----------------------------------------------------------------------
     def convet_to_price_event(self, swap_event: SwapEvent) -> PriceEvent:
         if not isinstance(swap_event, SwapEvent):
@@ -363,8 +392,8 @@ class ContractWrapper:
         amount0_wei = int(Decimal(amount0_desired) * (Decimal(10) ** Decimal(token0_decimals)))
         amount1_wei = int(Decimal(amount1_desired) * (Decimal(10) ** Decimal(token1_decimals)))
 
-        balance0 = self._get_balance(self._token0_address)
-        balance1 = self._get_balance(self._token1_address)
+        balance0 = self.get_balance(self._token0_address)
+        balance1 = self.get_balance(self._token1_address)
 
         if int(balance0) < int(amount0_wei) or int(balance1) < int(amount1_wei):
             raise RuntimeError(f'Insufficient balance: balance0={balance0} need0={amount0_wei} '
@@ -506,7 +535,7 @@ class ContractWrapper:
         signed = self._w3.eth.account.sign_transaction(tx, private_key=str(self._private_key))
         self._w3.eth.send_raw_transaction(signed.raw_transaction)
 
-    def _get_balance(self, token_address: str) -> int:
+    def get_balance(self, token_address: str) -> int:
         erc20 = self._w3.eth.contract(
             address=self._to_checksum_address(token_address),
             abi=self._erc20_abi,

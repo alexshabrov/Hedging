@@ -12,8 +12,12 @@ license = { text = "Proprietary" }
 
 dependencies = [
   "pydantic>=2.2.0",
+  "orjson",
   "web3",
   "websocket-client",
+  "requests",
+  "eth-account",
+  "cowdao-cowpy",
 ]
 
 [tool.setuptools]
@@ -28,4 +32,6 @@ packages = [
   "dex.logic",
   "dex.models",
   "dex.realtime",
+  "dex.swappers",
+  "dex.swappers.cow_swap",
 ]
