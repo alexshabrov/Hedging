@@ -63,6 +63,7 @@ class Hedger:
         self.last_stats = None
     
     def run(self) -> HedgerStats:
+        self.last_stats = None
         self._validate_config()
         
         exchange = None
