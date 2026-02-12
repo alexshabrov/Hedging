@@ -106,8 +106,10 @@ class HedgeCalcStats(StrictModel):
 class UniswapStats(StrictModel):
     token_id: Optional[int]
     mint: Optional[MintResult]
+    mint_tx_timestamp_ms: int
     position: Optional[PositionState]
     decrease: Optional[DecreaseLiquidityResult]
+    decrease_tx_timestamp_ms: int
     collect: Optional[CollectFeesResult]
     rebalance: Optional[SwapResult]
     initial_balance0_raw: int
@@ -119,8 +121,10 @@ class UniswapStats(StrictModel):
         return {
             'token_id': self.token_id,
             'mint': None if self.mint is None else self.mint.model_dump(),
+            'mint_tx_timestamp_ms': int(self.mint_tx_timestamp_ms),
             'position': None if self.position is None else self.position.model_dump(),
             'decrease': None if self.decrease is None else self.decrease.model_dump(),
+            'decrease_tx_timestamp_ms': int(self.decrease_tx_timestamp_ms),
             'collect': None if self.collect is None else self.collect.model_dump(),
             'rebalance': None if self.rebalance is None else self.rebalance.model_dump(),
             'initial_balance0_raw': int(self.initial_balance0_raw),

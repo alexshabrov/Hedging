@@ -84,6 +84,8 @@ class Hedger:
         init_balance1_raw = 0
         final_balance0_raw = 0
         final_balance1_raw = 0
+        mint_tx_timestamp_ms = 0
+        decrease_tx_timestamp_ms = 0
         
         calc_stats = None
         status = HedgeRunStatus.INITIALIZED
@@ -303,6 +305,9 @@ class Hedger:
                 raise RuntimeError('Hedger: mint token_id is missing')
             
             token_id = int(mint_res.token_id)
+            mint_tx_timestamp_ms = int(cw.get_tx_timestamp_ms(str(mint_res.tx_hash)))
+            if int(mint_tx_timestamp_ms) <= 0:
+                raise RuntimeError(f'Hedger: bad mint_tx_timestamp_ms: {mint_tx_timestamp_ms}')
             
             self._logger.info(f'hedger_minted token_id={token_id} amount_base={mint_res.amount_base} amount_quote={mint_res.amount_quote} tx={mint_res.tx_hash}')
             
@@ -349,7 +354,7 @@ class Hedger:
                     cleanup_errors.append(e)
             
             def _cleanup_dex():
-                nonlocal dec_res, col_res, reb_res, final_balance0_raw, final_balance1_raw
+                nonlocal dec_res, col_res, reb_res, final_balance0_raw, final_balance1_raw, decrease_tx_timestamp_ms
                 
                 if token_id is None or cw is None:
                     return
@@ -357,6 +362,9 @@ class Hedger:
                 try:
                     self._logger.info(f'hedger_decrease_start token_id={token_id}')
                     dec_res = cw.decrease_liquidity(int(token_id), liquidity_percent=100)
+                    decrease_tx_timestamp_ms = int(cw.get_tx_timestamp_ms(str(dec_res.tx_hash)))
+                    if int(decrease_tx_timestamp_ms) <= 0:
+                        raise RuntimeError(f'Hedger: bad decrease_tx_timestamp_ms: {decrease_tx_timestamp_ms}')
                     self._logger.info(f'hedger_decrease_done token_id={token_id} ok={dec_res.ok} amount_base={dec_res.amount_base} amount_quote={dec_res.amount_quote}')
                 except Exception as e:
                     _add_cleanup_error(e)
@@ -429,8 +437,10 @@ class Hedger:
                 uniswap_stats = UniswapStats(
                     token_id=int(token_id) if token_id is not None else None,
                     mint=mint_res,
+                    mint_tx_timestamp_ms=int(mint_tx_timestamp_ms),
                     position=pos_state,
                     decrease=dec_res,
+                    decrease_tx_timestamp_ms=int(decrease_tx_timestamp_ms),
                     collect=col_res,
                     rebalance=reb_res,
                     initial_balance0_raw=int(init_balance0_raw),

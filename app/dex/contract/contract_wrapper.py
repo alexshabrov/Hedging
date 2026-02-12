@@ -719,6 +719,44 @@ class ContractWrapper:
             gas_cost_eth = float(gas_cost_wei) / float(10 ** 18)
 
         return gas_used, gas_price_wei, gas_cost_wei, gas_cost_eth
+    
+    def get_tx_timestamp_ms(self, tx_hash: str) -> int:
+        if not isinstance(tx_hash, str) or len(tx_hash) == 0:
+            raise RuntimeError('tx_hash is empty')
+        
+        tx_hash_norm = str(tx_hash)
+        if not tx_hash_norm.startswith('0x'):
+            tx_hash_norm = '0x' + str(tx_hash_norm)
+        
+        try:
+            receipt = self._w3.eth.get_transaction_receipt(str(tx_hash_norm))
+        except Exception as e:
+            raise RuntimeError(f'Failed to get receipt for tx_hash={tx_hash_norm}: {e}')
+        
+        if receipt is None:
+            raise RuntimeError(f'Receipt is None for tx_hash={tx_hash_norm}')
+        if 'blockNumber' not in receipt:
+            raise RuntimeError(f'blockNumber missing in receipt for tx_hash={tx_hash_norm}')
+        
+        block_number = int(receipt['blockNumber'])
+        if int(block_number) < 0:
+            raise RuntimeError(f'Invalid blockNumber={block_number} for tx_hash={tx_hash_norm}')
+        
+        try:
+            block = self._w3.eth.get_block(int(block_number))
+        except Exception as e:
+            raise RuntimeError(f'Failed to get block={block_number} for tx_hash={tx_hash_norm}: {e}')
+        
+        if block is None:
+            raise RuntimeError(f'Block is None for blockNumber={block_number} tx_hash={tx_hash_norm}')
+        if 'timestamp' not in block:
+            raise RuntimeError(f'timestamp missing in block={block_number} for tx_hash={tx_hash_norm}')
+        
+        ts_sec = int(block['timestamp'])
+        if int(ts_sec) <= 0:
+            raise RuntimeError(f'Invalid block timestamp={ts_sec} for tx_hash={tx_hash_norm}')
+        
+        return int(ts_sec) * 1000
 
     # ----------------------------------------------------------------------
     def get_position_state(self, token_id: int) -> PositionState:
