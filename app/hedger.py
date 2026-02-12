@@ -1,7 +1,7 @@
 import argparse, os
 import orjson
 
-from modules.hedger import Hedger
+from modules.hedger_class import Hedger
 from models.hedger_models import HedgerConfig
 
 

@@ -2,6 +2,8 @@ import argparse, os, traceback
 import orjson
 from dex.contract.contract_wrapper import ContractWrapper
 from dex.lib.logger import get_logger
+from dex.lib.strict_model import StrictModel
+from dex.models.contract_models import CollectFeesResult, DecreaseLiquidityResult, MintResult
 from dex.models.swapper_models import CowSwapConfig, SwapRequest, SwapperType
 from dex.swappers.swapper_factory import SwapperFactory
 
@@ -47,9 +49,8 @@ def main():
     quote_address = cw.get_quote_token_address()
     token0_decimals = cw.get_token0_decimals()
     token1_decimals = cw.get_token1_decimals()
-
-    init_balance0_raw = cw.get_balance(str(token0_address))
-    init_balance1_raw = cw.get_balance(str(token1_address))
+    init_balance0_raw = int(cw.get_balance(str(token0_address)))
+    init_balance1_raw = int(cw.get_balance(str(token1_address)))
 
     swapper_config = CowSwapConfig(
         swapper_type=SwapperType.COW_SWAP,
@@ -65,6 +66,117 @@ def main():
 
     def _dump(data: dict) -> str:
         return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode('utf-8')
+
+    def _get_price_now() -> float:
+        price_now = float(cw.get_current_traditional_price())
+        if float(price_now) <= 0:
+            raise RuntimeError('price_now must be > 0')
+        return float(price_now)
+
+    class _QuoteBaseState(StrictModel):
+        quote_decimals: int
+        base_decimals: int
+        quote_address: str
+        base_address: str
+        quote_raw: int
+        base_raw: int
+
+        def model_dump(self) -> dict:  # type: ignore[override]
+            return {
+                'quote_decimals': self.quote_decimals,
+                'base_decimals': self.base_decimals,
+                'quote_address': self.quote_address,
+                'base_address': self.base_address,
+                'quote_raw': self.quote_raw,
+                'base_raw': self.base_raw,
+            }
+
+    class _LiquidityLossReport(StrictModel):
+        price_change_pct: float
+        value_change_pct: float
+
+        def model_dump(self) -> dict:  # type: ignore[override]
+            return {
+                'price_change_pct': self.price_change_pct,
+                'value_change_pct': self.value_change_pct,
+            }
+
+    def _get_quote_base_state(balance0_raw: int, balance1_raw: int) -> _QuoteBaseState:
+        token0_lower = str(token0_address).lower()
+        token1_lower = str(token1_address).lower()
+        quote_lower = str(quote_address).lower()
+
+        if quote_lower == token0_lower:
+            return _QuoteBaseState(
+                quote_decimals=int(token0_decimals),
+                base_decimals=int(token1_decimals),
+                quote_address=str(token0_address),
+                base_address=str(token1_address),
+                quote_raw=int(balance0_raw),
+                base_raw=int(balance1_raw),
+            )
+
+        if quote_lower == token1_lower:
+            return _QuoteBaseState(
+                quote_decimals=int(token1_decimals),
+                base_decimals=int(token0_decimals),
+                quote_address=str(token1_address),
+                base_address=str(token0_address),
+                quote_raw=int(balance1_raw),
+                base_raw=int(balance0_raw),
+            )
+
+        raise RuntimeError('quote token does not match pool tokens')
+
+    def _calc_loss_report(price_start: float, price_now: float, quote_start: float, base_start: float,
+                          quote_now: float, base_now: float) -> _LiquidityLossReport:
+        if float(price_start) <= 0:
+            raise RuntimeError('loss report: price_start must be > 0')
+        if float(price_now) <= 0:
+            raise RuntimeError('loss report: price_now must be > 0')
+        if float(quote_start) <= 0:
+            raise RuntimeError('loss report: quote_start must be > 0')
+        if float(base_start) < 0:
+            raise RuntimeError('loss report: base_start must be >= 0')
+        if float(quote_now) <= 0:
+            raise RuntimeError('loss report: quote_now must be > 0')
+        if float(base_now) < 0:
+            raise RuntimeError('loss report: base_now must be >= 0')
+
+        total_start = float(quote_start) + float(base_start) * float(price_start)
+        total_now = float(quote_now) + float(base_now) * float(price_now)
+
+        if float(total_start) <= 0:
+            raise RuntimeError('loss report: total_start must be > 0')
+
+        price_change_pct = (float(price_now) - float(price_start)) / float(price_start) * 100.0
+        value_change_pct = (float(total_now) - float(total_start)) / float(total_start) * 100.0
+
+        return _LiquidityLossReport(
+            price_change_pct=float(price_change_pct),
+            value_change_pct=float(value_change_pct),
+        )
+
+    def _log_loss_report(price_start: float, price_now: float, quote_start: float, base_start: float,
+                         quote_now: float, base_now: float) -> None:
+        report = _calc_loss_report(
+            price_start=float(price_start),
+            price_now=float(price_now),
+            quote_start=float(quote_start),
+            base_start=float(base_start),
+            quote_now=float(quote_now),
+            base_now=float(base_now),
+        )
+        logger.info(
+            'LOSS_REPORT\n'
+            f'price_change_pct={report.price_change_pct}\n'
+            f'value_change_pct={report.value_change_pct}'
+        )
+
+    add_price = None
+    add_quote = None
+    add_base = None
+    last_decrease = None
 
     logger.info('Commands: ADD <price_lower|-> <price_upper|-> <total_quote> | STATE <token_id> | REMOVE <token_id> | COLLECT <token_id> | REBALANCE | HELP')
 
@@ -87,13 +199,29 @@ def main():
                 price_lower = None if str(parts[1]).strip() == '-' else float(parts[1])
                 price_upper = None if str(parts[2]).strip() == '-' else float(parts[2])
                 total_quote = float(parts[3])
+                add_price = float(_get_price_now())
                 result = cw.add_liquidity_traditional(
                     fee_pct=float(args.fee_pct),
                     price_lower=price_lower,
                     price_upper=price_upper,
                     total_quote=float(total_quote),
                 )
+                if result is None:
+                    raise RuntimeError('ADD result is None')
+                if not isinstance(result, MintResult):
+                    raise RuntimeError(f'ADD result is not MintResult: {type(result)}')
+                if not bool(result.ok):
+                    raise RuntimeError('ADD failed')
+                if result.token_id is None or int(result.token_id) <= 0:
+                    raise RuntimeError('ADD token_id is missing')
                 logger.info(f'ADD result: {_dump(result.model_dump())}')
+                add_price = float(_get_price_now())
+                if result.amount_quote is None:
+                    raise RuntimeError('ADD amount_quote is missing')
+                if result.amount_base is None:
+                    raise RuntimeError('ADD amount_base is missing')
+                add_quote = float(result.amount_quote)
+                add_base = float(result.amount_base)
                 continue
 
             if action == 'STATE':
@@ -107,53 +235,61 @@ def main():
                 if len(parts) != 2:
                     raise RuntimeError('REMOVE requires token_id')
                 res = cw.decrease_liquidity(int(parts[1]), liquidity_percent=100)
+                if res is None:
+                    raise RuntimeError('REMOVE result is None')
+                if not isinstance(res, DecreaseLiquidityResult):
+                    raise RuntimeError(f'REMOVE result is not DecreaseLiquidityResult: {type(res)}')
+                if not bool(res.ok):
+                    raise RuntimeError('REMOVE failed')
                 logger.info(f'REMOVE result: {_dump(res.model_dump())}')
+                last_decrease = res
                 continue
 
             if action == 'COLLECT':
                 if len(parts) != 2:
                     raise RuntimeError('COLLECT requires token_id')
                 res = cw.collect_fees(int(parts[1]))
+                if res is None:
+                    raise RuntimeError('COLLECT result is None')
+                if not isinstance(res, CollectFeesResult):
+                    raise RuntimeError(f'COLLECT result is not CollectFeesResult: {type(res)}')
+                if not bool(res.ok):
+                    raise RuntimeError('COLLECT failed')
                 logger.info(f'COLLECT result: {_dump(res.model_dump())}')
+                if add_price is None or add_quote is None or add_base is None:
+                    raise RuntimeError('ADD state is missing')
+                if last_decrease is None:
+                    raise RuntimeError('REMOVE state is missing')
+                if last_decrease.amount_quote is None:
+                    raise RuntimeError('REMOVE amount_quote is missing')
+                if last_decrease.amount_base is None:
+                    raise RuntimeError('REMOVE amount_base is missing')
+                price_now = float(_get_price_now())
+                _log_loss_report(
+                    price_start=float(add_price),
+                    price_now=float(price_now),
+                    quote_start=float(add_quote),
+                    base_start=float(add_base),
+                    quote_now=float(last_decrease.amount_quote),
+                    base_now=float(last_decrease.amount_base),
+                )
                 continue
 
             if action == 'REBALANCE':
                 if len(parts) != 1:
                     raise RuntimeError('REBALANCE does not accept arguments')
 
-                balance0_raw = cw.get_balance(str(token0_address))
-                balance1_raw = cw.get_balance(str(token1_address))
-                current_price = cw.get_current_traditional_price()
+                balance0_raw = int(cw.get_balance(str(token0_address)))
+                balance1_raw = int(cw.get_balance(str(token1_address)))
+                current_price = float(_get_price_now())
 
-                token0_address = str(token0_address).lower()
-                token1_address = str(token1_address).lower()
-                quote_address = str(quote_address).lower()
+                state_now = _get_quote_base_state(int(balance0_raw), int(balance1_raw))
+                quote_now = float(state_now.quote_raw) / float(10 ** int(state_now.quote_decimals))
+                base_now = float(state_now.base_raw) / float(10 ** int(state_now.base_decimals))
 
-                if quote_address == token0_address:
-                    quote_decimals = int(token0_decimals)
-                    base_decimals = int(token1_decimals)
-                    quote_now_raw = int(balance0_raw)
-                    base_now_raw = int(balance1_raw)
-                    quote_init_raw = int(init_balance0_raw)
-                    base_init_raw = int(init_balance1_raw)
-                    quote_address_now = str(token0_address)
-                    base_address_now = str(token1_address)
-                elif quote_address == token1_address:
-                    quote_decimals = int(token1_decimals)
-                    base_decimals = int(token0_decimals)
-                    quote_now_raw = int(balance1_raw)
-                    base_now_raw = int(balance0_raw)
-                    quote_init_raw = int(init_balance1_raw)
-                    base_init_raw = int(init_balance0_raw)
-                    quote_address_now = str(token1_address)
-                    base_address_now = str(token0_address)
-                else:
-                    raise RuntimeError('quote token does not match pool tokens')
-
-                quote_now = float(quote_now_raw) / float(10 ** quote_decimals)
-                base_now = float(base_now_raw) / float(10 ** base_decimals)
-                quote_init = float(quote_init_raw) / float(10 ** quote_decimals)
-                base_init = float(base_init_raw) / float(10 ** base_decimals)
+                state_init = _get_quote_base_state(int(init_balance0_raw), int(init_balance1_raw))
+                quote_init = float(state_init.quote_raw) / float(10 ** int(state_init.quote_decimals))
+                base_init = float(state_init.base_raw) / float(10 ** int(state_init.base_decimals))
 
                 delta_quote = float(quote_now) - float(quote_init)
                 delta_base = float(base_now) - float(base_init)
@@ -173,8 +309,8 @@ def main():
                     if float(quote_now) < float(quote_needed):
                         raise RuntimeError('insufficient quote balance for rebalance')
 
-                    sell_token = str(quote_address_now)
-                    buy_token = str(base_address_now)
+                    sell_token = str(state_now.quote_address)
+                    buy_token = str(state_now.base_address)
                     sell_amount = float(quote_needed)
 
                 elif float(delta_base) > 0.0 and float(delta_quote) < 0.0:
@@ -185,8 +321,8 @@ def main():
                     if float(base_now) < float(base_needed):
                         raise RuntimeError('insufficient base balance for rebalance')
 
-                    sell_token = str(base_address_now)
-                    buy_token = str(quote_address_now)
+                    sell_token = str(state_now.base_address)
+                    buy_token = str(state_now.quote_address)
                     sell_amount = float(base_needed)
 
                 else:
