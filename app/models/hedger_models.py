@@ -5,9 +5,10 @@ Version: 1.0
 """
 from enum import Enum
 from typing import List, Optional
+import orjson
 
 from live.lib.strict_model import StrictModel
-from live.logic.models import HedgeSnapshot
+from live.logic.models import HedgeSnapshot, HedgeStatus, HedgeLeg, HedgeChaseKind
 
 from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PositionState
 from dex.models.swapper_models import SwapResult
@@ -160,3 +161,140 @@ class HedgerStats(StrictModel):
             'live': self.live.model_dump(),
             'error': self.error,
         }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'HedgerStats':
+        if data is None:
+            raise RuntimeError('HedgerStats.from_dict: data is None')
+        if not isinstance(data, dict):
+            raise RuntimeError(f'HedgerStats.from_dict: data is not dict: {type(data)}')
+        
+        status = HedgeRunStatus(str(data['status']))
+        
+        calc_raw = data['calc']
+        if calc_raw is None:
+            raise RuntimeError('HedgerStats.from_dict: calc is None')
+        if not isinstance(calc_raw, dict):
+            raise RuntimeError(f'HedgerStats.from_dict: calc is not dict: {type(calc_raw)}')
+        if 'trigger_mode' not in calc_raw:
+            raise RuntimeError('HedgerStats.from_dict: calc.trigger_mode missing')
+        
+        calc = HedgeCalcStats(
+            base_price=float(calc_raw['base_price']),
+            price_lower=float(calc_raw['price_lower']),
+            price_upper=float(calc_raw['price_upper']),
+            total_quote=float(calc_raw['total_quote']),
+            cex_ratio=float(calc_raw['cex_ratio']),
+            trigger_mode=CexTriggerMode(str(calc_raw['trigger_mode'])),
+            trigger_offset_pct_x10000=int(calc_raw['trigger_offset_pct_x10000']),
+            target_offset_pct_x10000=int(calc_raw['target_offset_pct_x10000']),
+            hedge_quote=float(calc_raw['hedge_quote']),
+        )
+        
+        uni_raw = data['uniswap']
+        if uni_raw is None:
+            raise RuntimeError('HedgerStats.from_dict: uniswap is None')
+        if not isinstance(uni_raw, dict):
+            raise RuntimeError(f'HedgerStats.from_dict: uniswap is not dict: {type(uni_raw)}')
+        if 'mint_tx_timestamp_ms' not in uni_raw:
+            raise RuntimeError('HedgerStats.from_dict: uniswap.mint_tx_timestamp_ms missing')
+        if 'decrease_tx_timestamp_ms' not in uni_raw:
+            raise RuntimeError('HedgerStats.from_dict: uniswap.decrease_tx_timestamp_ms missing')
+        
+        mint = None if uni_raw['mint'] is None else MintResult.from_dict(uni_raw['mint'])
+        position = None if uni_raw['position'] is None else PositionState.from_dict(uni_raw['position'])
+        decrease = None if uni_raw['decrease'] is None else DecreaseLiquidityResult.from_dict(uni_raw['decrease'])
+        collect = None if uni_raw['collect'] is None else CollectFeesResult.from_dict(uni_raw['collect'])
+        rebalance = None if uni_raw['rebalance'] is None else SwapResult.from_dict(uni_raw['rebalance'])
+        
+        uniswap = UniswapStats(
+            token_id=None if uni_raw['token_id'] is None else int(uni_raw['token_id']),
+            mint=mint,
+            mint_tx_timestamp_ms=int(uni_raw['mint_tx_timestamp_ms']),
+            position=position,
+            decrease=decrease,
+            decrease_tx_timestamp_ms=int(uni_raw['decrease_tx_timestamp_ms']),
+            collect=collect,
+            rebalance=rebalance,
+            initial_balance0_raw=int(uni_raw['initial_balance0_raw']),
+            initial_balance1_raw=int(uni_raw['initial_balance1_raw']),
+            final_balance0_raw=int(uni_raw['final_balance0_raw']),
+            final_balance1_raw=int(uni_raw['final_balance1_raw']),
+        )
+        
+        live_raw = data['live']
+        if live_raw is None:
+            raise RuntimeError('HedgerStats.from_dict: live is None')
+        if not isinstance(live_raw, dict):
+            raise RuntimeError(f'HedgerStats.from_dict: live is not dict: {type(live_raw)}')
+        
+        snapshot_raw = live_raw['last_snapshot']
+        if snapshot_raw is None:
+            snapshot = None
+        else:
+            if not isinstance(snapshot_raw, dict):
+                raise RuntimeError(f'HedgerStats.from_dict: last_snapshot is not dict: {type(snapshot_raw)}')
+            
+            snap = dict(snapshot_raw)
+            snap['status'] = HedgeStatus(str(snap['status']))
+            
+            if snap['opened_leg'] is not None:
+                snap['opened_leg'] = HedgeLeg(str(snap['opened_leg']))
+            
+            metrics = snap['metrics']
+            if metrics is None:
+                raise RuntimeError('HedgerStats.from_dict: last_snapshot.metrics is None')
+            if not isinstance(metrics, dict):
+                raise RuntimeError(f'HedgerStats.from_dict: last_snapshot.metrics is not dict: {type(metrics)}')
+            
+            chases = metrics['chases']
+            if chases is None:
+                raise RuntimeError('HedgerStats.from_dict: last_snapshot.metrics.chases is None')
+            if not isinstance(chases, list):
+                raise RuntimeError(f'HedgerStats.from_dict: last_snapshot.metrics.chases is not list: {type(chases)}')
+            
+            normalized_chases = []
+            for chase_raw in chases:
+                if chase_raw is None:
+                    raise RuntimeError('HedgerStats.from_dict: chase is None')
+                if not isinstance(chase_raw, dict):
+                    raise RuntimeError(f'HedgerStats.from_dict: chase is not dict: {type(chase_raw)}')
+                
+                ch = dict(chase_raw)
+                ch['kind'] = HedgeChaseKind(str(ch['kind']))
+                normalized_chases.append(ch)
+            
+            metrics['chases'] = normalized_chases
+            snapshot = HedgeSnapshot(**snap)
+        
+        live = LiveStats(
+            last_snapshot=snapshot,
+            last_snapshot_json=None if live_raw['last_snapshot_json'] is None else str(live_raw['last_snapshot_json']),
+        )
+        
+        return cls(
+            status=status,
+            calc=calc,
+            uniswap=uniswap,
+            live=live,
+            error=None if data['error'] is None else str(data['error']),
+        )
+    
+    @classmethod
+    def from_json(cls, raw) -> 'HedgerStats':
+        if raw is None:
+            raise RuntimeError('HedgerStats.from_json: raw is None')
+        
+        if isinstance(raw, bytes):
+            payload = orjson.loads(raw)
+        elif isinstance(raw, bytearray):
+            payload = orjson.loads(bytes(raw))
+        elif isinstance(raw, str):
+            payload = orjson.loads(raw.encode('utf-8'))
+        else:
+            raise RuntimeError(f'HedgerStats.from_json: raw must be bytes/bytearray/str, got: {type(raw)}')
+        
+        if not isinstance(payload, dict):
+            raise RuntimeError(f'HedgerStats.from_json: payload is not dict: {type(payload)}')
+        
+        return cls.from_dict(payload)
