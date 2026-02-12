@@ -21,6 +21,11 @@ class HedgeRunStatus(str, Enum):
     FAILED = 'failed'
 
 
+class CexTriggerMode(str, Enum):
+    ONE_TICK = 'one_tick'
+    SMALL_PCT = 'small_pct'
+
+
 ### Models ###
 class HedgerConfig(StrictModel):
     symbol: str
@@ -28,10 +33,14 @@ class HedgerConfig(StrictModel):
     network: str
     pool_address: str
     fee_pct: float
-    price_lower: float
-    price_upper: float
+    price_lower: Optional[float]
+    price_upper: Optional[float]
+    price_lower_pct: Optional[float] = None
+    price_upper_pct: Optional[float] = None
     total_quote: float
     cex_ratio: float = 0.5
+    trigger_mode: CexTriggerMode
+    trigger_pct: float = 0.05
     mongo_uri: str
     mongo_db: str
     mongo_collection: str
@@ -49,10 +58,14 @@ class HedgerConfig(StrictModel):
             'network': self.network,
             'pool_address': self.pool_address,
             'fee_pct': float(self.fee_pct),
-            'price_lower': float(self.price_lower),
-            'price_upper': float(self.price_upper),
+            'price_lower': None if self.price_lower is None else float(self.price_lower),
+            'price_upper': None if self.price_upper is None else float(self.price_upper),
+            'price_lower_pct': None if self.price_lower_pct is None else float(self.price_lower_pct),
+            'price_upper_pct': None if self.price_upper_pct is None else float(self.price_upper_pct),
             'total_quote': float(self.total_quote),
             'cex_ratio': float(self.cex_ratio),
+            'trigger_mode': self.trigger_mode.value,
+            'trigger_pct': float(self.trigger_pct),
             'mongo_uri': self.mongo_uri,
             'mongo_db': self.mongo_db,
             'mongo_collection': self.mongo_collection,
@@ -71,6 +84,7 @@ class HedgeCalcStats(StrictModel):
     price_upper: float
     total_quote: float
     cex_ratio: float
+    trigger_mode: CexTriggerMode
     trigger_offset_pct_x10000: int
     target_offset_pct_x10000: int
     hedge_quote: float
@@ -82,6 +96,7 @@ class HedgeCalcStats(StrictModel):
             'price_upper': float(self.price_upper),
             'total_quote': float(self.total_quote),
             'cex_ratio': float(self.cex_ratio),
+            'trigger_mode': self.trigger_mode.value,
             'trigger_offset_pct_x10000': int(self.trigger_offset_pct_x10000),
             'target_offset_pct_x10000': int(self.target_offset_pct_x10000),
             'hedge_quote': float(self.hedge_quote),

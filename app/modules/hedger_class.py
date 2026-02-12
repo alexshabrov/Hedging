@@ -3,10 +3,10 @@ Hedger module
 Date: 2026-02-11
 Version: 1.0
 """
-import sys, time
+import sys, time, threading
 from typing import Optional
 
-from pymongo import MongoClient
+from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
 from live.exchanges.exchange_factory import get_exchange_class, get_realtime_class
@@ -33,6 +33,7 @@ from models.hedger_models import (
     LiveStats,
     HedgerStats,
     HedgeRunStatus,
+    CexTriggerMode,
 )
 
 
@@ -104,10 +105,31 @@ class Hedger:
             if float(price_now) <= 0:
                 raise RuntimeError(f'Hedger: bad current price: {price_now}')
             
-            price_lower = float(self.config.price_lower)
-            price_upper = float(self.config.price_upper)
+            price_lower_pct = self.config.price_lower_pct
+            price_upper_pct = self.config.price_upper_pct
             
-            self._logger.info(f'hedger_prices price_now={price_now} price_lower={price_lower} price_upper={price_upper}')
+            if (price_lower_pct is None) != (price_upper_pct is None):
+                raise RuntimeError('Hedger: price_lower_pct and price_upper_pct must be set together')
+            
+            if price_lower_pct is not None and price_upper_pct is not None:
+                if self.config.price_lower is not None or self.config.price_upper is not None:
+                    raise RuntimeError('Hedger: price bounds and price pct cannot be set together')
+                
+                if float(price_lower_pct) <= 0 or float(price_upper_pct) <= 0:
+                    raise RuntimeError('Hedger: price pct must be > 0')
+                
+                price_lower = float(price_now) * (1.0 - float(price_lower_pct) / 100.0)
+                price_upper = float(price_now) * (1.0 + float(price_upper_pct) / 100.0)
+                
+                self._logger.info(f'hedger_prices price_now={price_now} price_lower={price_lower} price_upper={price_upper} price_lower_pct={price_lower_pct} price_upper_pct={price_upper_pct}')
+            else:
+                if self.config.price_lower is None or self.config.price_upper is None:
+                    raise RuntimeError('Hedger: price_lower and price_upper must be set')
+                
+                price_lower = float(self.config.price_lower)
+                price_upper = float(self.config.price_upper)
+                
+                self._logger.info(f'hedger_prices price_now={price_now} price_lower={price_lower} price_upper={price_upper}')
             
             if float(price_lower) <= 0 or float(price_upper) <= 0:
                 raise RuntimeError('Hedger: price bounds must be > 0')
@@ -128,28 +150,15 @@ class Hedger:
             if abs(float(delta_up) - float(delta_dn)) > float(avg_delta) * 1e-6:
                 raise RuntimeError('Hedger: bounds are not symmetric around current price')
             
-            target_offset_pct_x10000 = int(round((float(delta_up) / float(price_now)) * 10000.0))
+            target_offset_pct_x10000 = int(round((float(delta_up) / float(price_now)) * 1_000_000.0))
             if int(target_offset_pct_x10000) <= 0:
                 raise RuntimeError('Hedger: target_offset_pct_x10000 must be > 0')
-            
-            trigger_offset_pct_x10000 = int(target_offset_pct_x10000)
             
             hedge_quote = float(self.config.total_quote) * float(self.config.cex_ratio)
             if float(hedge_quote) <= 0:
                 raise RuntimeError('Hedger: hedge_quote must be > 0')
             
             self._logger.info(f'hedger_quote total_quote={self.config.total_quote} cex_ratio={self.config.cex_ratio} hedge_quote={hedge_quote}')
-            
-            calc_stats = HedgeCalcStats(
-                base_price=float(price_now),
-                price_lower=float(price_lower),
-                price_upper=float(price_upper),
-                total_quote=float(self.config.total_quote),
-                cex_ratio=float(self.config.cex_ratio),
-                trigger_offset_pct_x10000=int(trigger_offset_pct_x10000),
-                target_offset_pct_x10000=int(target_offset_pct_x10000),
-                hedge_quote=float(hedge_quote),
-            )
             
             ExchangeClass = get_exchange_class('Binance')
             RealtimeClass = get_realtime_class('Binance')
@@ -174,6 +183,39 @@ class Hedger:
                 raise RuntimeError(f'Hedger: rule not found for symbol: {self.config.symbol}')
             
             rule = rules[self.config.symbol]
+            
+            trigger_mode = self.config.trigger_mode
+            if trigger_mode == CexTriggerMode.ONE_TICK:
+                price_step = float(rule.price_step)
+                if float(price_step) <= 0:
+                    raise RuntimeError(f'Hedger: bad price_step for one_tick mode: {rule.price_step}')
+                
+                trigger_offset_pct_x10000 = int(round((float(price_step) / float(price_now)) * 1_000_000.0))
+                if int(trigger_offset_pct_x10000) <= 0:
+                    raise RuntimeError('Hedger: one_tick produced non-positive trigger_offset_pct_x10000')
+            elif trigger_mode == CexTriggerMode.SMALL_PCT:
+                trigger_offset_pct_x10000 = int(round(float(self.config.trigger_pct) * 10_000.0))
+                if int(trigger_offset_pct_x10000) <= 0:
+                    raise RuntimeError('Hedger: small_pct produced non-positive trigger_offset_pct_x10000')
+            else:
+                raise RuntimeError(f'Hedger: unsupported trigger_mode: {trigger_mode}')
+            
+            if int(trigger_offset_pct_x10000) >= int(target_offset_pct_x10000):
+                raise RuntimeError(f'Hedger: trigger_offset_pct_x10000 must be < target_offset_pct_x10000, got trigger={trigger_offset_pct_x10000} target={target_offset_pct_x10000}')
+            
+            self._logger.info(f'hedger_trigger trigger_mode={trigger_mode.value} trigger_pct={self.config.trigger_pct} trigger_offset_pct_x10000={trigger_offset_pct_x10000} target_offset_pct_x10000={target_offset_pct_x10000}')
+            
+            calc_stats = HedgeCalcStats(
+                base_price=float(price_now),
+                price_lower=float(price_lower),
+                price_upper=float(price_upper),
+                total_quote=float(self.config.total_quote),
+                cex_ratio=float(self.config.cex_ratio),
+                trigger_mode=trigger_mode,
+                trigger_offset_pct_x10000=int(trigger_offset_pct_x10000),
+                target_offset_pct_x10000=int(target_offset_pct_x10000),
+                hedge_quote=float(hedge_quote),
+            )
             
             def on_volume(req: HedgeVolumeRequest) -> int:
                 if req is None:
@@ -300,21 +342,31 @@ class Hedger:
         
         finally:
             cleanup_errors = []
+            cleanup_lock = threading.Lock()
             
-            if token_id is not None and cw is not None:
+            def _add_cleanup_error(e):
+                with cleanup_lock:
+                    cleanup_errors.append(e)
+            
+            def _cleanup_dex():
+                nonlocal dec_res, col_res, reb_res, final_balance0_raw, final_balance1_raw
+                
+                if token_id is None or cw is None:
+                    return
+                
                 try:
                     self._logger.info(f'hedger_decrease_start token_id={token_id}')
                     dec_res = cw.decrease_liquidity(int(token_id), liquidity_percent=100)
                     self._logger.info(f'hedger_decrease_done token_id={token_id} ok={dec_res.ok} amount_base={dec_res.amount_base} amount_quote={dec_res.amount_quote}')
                 except Exception as e:
-                    cleanup_errors.append(e)
+                    _add_cleanup_error(e)
                 
                 try:
                     self._logger.info(f'hedger_collect_start token_id={token_id}')
                     col_res = cw.collect_fees(int(token_id))
                     self._logger.info(f'hedger_collect_done token_id={token_id} ok={col_res.ok} amount_base={col_res.amount_base} amount_quote={col_res.amount_quote}')
                 except Exception as e:
-                    cleanup_errors.append(e)
+                    _add_cleanup_error(e)
                 
                 try:
                     self._logger.info('hedger_rebalance_start')
@@ -328,7 +380,7 @@ class Hedger:
                     else:
                         self._logger.info(f'hedger_rebalance_done ok={reb_res.ok} status={reb_res.order.status.value if reb_res.order is not None else None}')
                 except Exception as e:
-                    cleanup_errors.append(e)
+                    _add_cleanup_error(e)
                 
                 try:
                     token0_address = cw.get_token0_address()
@@ -337,28 +389,38 @@ class Hedger:
                     final_balance1_raw = int(cw.get_balance(str(token1_address)))
                     self._logger.info(f'hedger_final_balances token0={token0_address} token1={token1_address} balance0_raw={final_balance0_raw} balance1_raw={final_balance1_raw}')
                 except Exception as e:
-                    cleanup_errors.append(e)
+                    _add_cleanup_error(e)
             
-            try:
-                if hedge is not None and bool(hedge.started):
-                    self._logger.info('hedger_hedge_stop')
-                    hedge.stop()
-            except Exception as e:
-                cleanup_errors.append(e)
+            def _cleanup_live():
+                try:
+                    if hedge is not None and bool(hedge.started):
+                        self._logger.info('hedger_hedge_stop')
+                        hedge.stop()
+                except Exception as e:
+                    _add_cleanup_error(e)
+                
+                try:
+                    if rt is not None:
+                        self._logger.info('hedger_rt_stop')
+                        rt.stop()
+                except Exception as e:
+                    _add_cleanup_error(e)
+                
+                try:
+                    if exchange is not None:
+                        self._logger.info('hedger_exchange_stop')
+                        exchange.stop()
+                except Exception as e:
+                    _add_cleanup_error(e)
             
-            try:
-                if rt is not None:
-                    self._logger.info('hedger_rt_stop')
-                    rt.stop()
-            except Exception as e:
-                cleanup_errors.append(e)
+            dex_cleanup_thread = threading.Thread(target=_cleanup_dex, name='hedger_dex_cleanup')
+            live_cleanup_thread = threading.Thread(target=_cleanup_live, name='hedger_live_cleanup')
             
-            try:
-                if exchange is not None:
-                    self._logger.info('hedger_exchange_stop')
-                    exchange.stop()
-            except Exception as e:
-                cleanup_errors.append(e)
+            dex_cleanup_thread.start()
+            live_cleanup_thread.start()
+            
+            dex_cleanup_thread.join()
+            live_cleanup_thread.join()
             
             if len(cleanup_errors) > 0:
                 self._logger.error(f'hedger_cleanup_errors errors={cleanup_errors}')
@@ -433,14 +495,35 @@ class Hedger:
             raise RuntimeError('HedgerConfig.pool_address is empty')
         if float(cfg.fee_pct) <= 0:
             raise RuntimeError('HedgerConfig.fee_pct must be > 0')
-        if float(cfg.price_lower) <= 0 or float(cfg.price_upper) <= 0:
-            raise RuntimeError('HedgerConfig.price bounds must be > 0')
-        if float(cfg.price_lower) >= float(cfg.price_upper):
-            raise RuntimeError('HedgerConfig.price_lower must be < price_upper')
+        if (cfg.price_lower_pct is None) != (cfg.price_upper_pct is None):
+            raise RuntimeError('HedgerConfig.price_lower_pct and price_upper_pct must be set together')
+        
+        if cfg.price_lower_pct is not None and cfg.price_upper_pct is not None:
+            if cfg.price_lower is not None or cfg.price_upper is not None:
+                raise RuntimeError('HedgerConfig.price bounds and price pct cannot be set together')
+            if float(cfg.price_lower_pct) <= 0 or float(cfg.price_upper_pct) <= 0:
+                raise RuntimeError('HedgerConfig.price pct must be > 0')
+        else:
+            if cfg.price_lower is None or cfg.price_upper is None:
+                raise RuntimeError('HedgerConfig.price_lower and price_upper must be set')
+            if float(cfg.price_lower) <= 0 or float(cfg.price_upper) <= 0:
+                raise RuntimeError('HedgerConfig.price bounds must be > 0')
+            if float(cfg.price_lower) >= float(cfg.price_upper):
+                raise RuntimeError('HedgerConfig.price_lower must be < price_upper')
         if float(cfg.total_quote) <= 0:
             raise RuntimeError('HedgerConfig.total_quote must be > 0')
         if float(cfg.cex_ratio) <= 0:
             raise RuntimeError('HedgerConfig.cex_ratio must be > 0')
+        if not isinstance(cfg.trigger_mode, CexTriggerMode):
+            raise RuntimeError(f'HedgerConfig.trigger_mode is not CexTriggerMode: {type(cfg.trigger_mode)}')
+        if cfg.trigger_mode == CexTriggerMode.SMALL_PCT:
+            if float(cfg.trigger_pct) <= 0:
+                raise RuntimeError('HedgerConfig.trigger_pct must be > 0 for small_pct mode')
+        elif cfg.trigger_mode == CexTriggerMode.ONE_TICK:
+            if float(cfg.trigger_pct) <= 0:
+                raise RuntimeError('HedgerConfig.trigger_pct must be > 0')
+        else:
+            raise RuntimeError(f'HedgerConfig.trigger_mode is unsupported: {cfg.trigger_mode}')
         if not isinstance(cfg.mongo_uri, str) or len(cfg.mongo_uri) == 0:
             raise RuntimeError('HedgerConfig.mongo_uri is empty')
         if not isinstance(cfg.mongo_db, str) or len(cfg.mongo_db) == 0:
