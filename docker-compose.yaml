@@ -10,6 +10,14 @@ services:
     networks:
       - nginx-common
 
+  hedging_mongo:
+    image: mongo
+    volumes:
+      - /_db/hedging_mongo:/data/db
+    networks:
+      - nginx-common
+    command: mongod # --replSet rs0 --bind_ip_all
+
 networks:
   nginx-common:
     external: true
