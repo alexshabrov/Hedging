@@ -32,6 +32,9 @@ class HedgerConfig(StrictModel):
     price_upper: float
     total_quote: float
     cex_ratio: float = 0.5
+    mongo_uri: str
+    mongo_db: str
+    mongo_collection: str
     tick_ms: int = 5
     gtx_cooldown_ms: int = 5
     entrance_timeout_ms: int = 60_000
@@ -50,6 +53,9 @@ class HedgerConfig(StrictModel):
             'price_upper': float(self.price_upper),
             'total_quote': float(self.total_quote),
             'cex_ratio': float(self.cex_ratio),
+            'mongo_uri': self.mongo_uri,
+            'mongo_db': self.mongo_db,
+            'mongo_collection': self.mongo_collection,
             'tick_ms': int(self.tick_ms),
             'gtx_cooldown_ms': int(self.gtx_cooldown_ms),
             'entrance_timeout_ms': int(self.entrance_timeout_ms),

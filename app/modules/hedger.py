@@ -6,6 +6,8 @@ Version: 1.0
 import sys, time
 from typing import Optional
 
+from pymongo import MongoClient
+
 from live.lib.logger import get_logger
 from live.exchanges.exchange_factory import get_exchange_class, get_realtime_class
 from live.logic.hedging import HedgeEngine
@@ -394,6 +396,12 @@ class Hedger:
                 
                 self.last_stats = stats
             
+            if self.last_stats is not None:
+                try:
+                    self._write_stats(self.last_stats)
+                except Exception as e:
+                    cleanup_errors.append(e)
+            
             if main_exc is not None and len(cleanup_errors) > 0:
                 _t, exc, _tb = main_exc
                 raise RuntimeError(f'Hedger failed and cleanup failed too: cleanup_errors={cleanup_errors}') from exc
@@ -433,6 +441,12 @@ class Hedger:
             raise RuntimeError('HedgerConfig.total_quote must be > 0')
         if float(cfg.cex_ratio) <= 0:
             raise RuntimeError('HedgerConfig.cex_ratio must be > 0')
+        if not isinstance(cfg.mongo_uri, str) or len(cfg.mongo_uri) == 0:
+            raise RuntimeError('HedgerConfig.mongo_uri is empty')
+        if not isinstance(cfg.mongo_db, str) or len(cfg.mongo_db) == 0:
+            raise RuntimeError('HedgerConfig.mongo_db is empty')
+        if not isinstance(cfg.mongo_collection, str) or len(cfg.mongo_collection) == 0:
+            raise RuntimeError('HedgerConfig.mongo_collection is empty')
         if int(cfg.tick_ms) <= 0:
             raise RuntimeError('HedgerConfig.tick_ms must be > 0')
         if int(cfg.gtx_cooldown_ms) <= 0:
@@ -564,3 +578,35 @@ class Hedger:
             raise RuntimeError(f'Hedger._rebalance: swap failed: {res.error}')
         
         return res
+    
+    def _write_stats(self, stats: HedgerStats) -> None:
+        if stats is None:
+            raise RuntimeError('Hedger._write_stats: stats is None')
+        if not isinstance(stats, HedgerStats):
+            raise RuntimeError(f'Hedger._write_stats: stats is not HedgerStats: {type(stats)}')
+        
+        uri = str(self.config.mongo_uri)
+        db_name = str(self.config.mongo_db)
+        collection_name = str(self.config.mongo_collection)
+        
+        if len(uri) == 0:
+            raise RuntimeError('Hedger._write_stats: mongo_uri is empty')
+        if len(db_name) == 0:
+            raise RuntimeError('Hedger._write_stats: mongo_db is empty')
+        if len(collection_name) == 0:
+            raise RuntimeError('Hedger._write_stats: mongo_collection is empty')
+        
+        self._logger.info(f'hedger_mongo_write uri={uri} db={db_name} collection={collection_name}')
+        
+        client = MongoClient(str(uri), serverSelectionTimeoutMS=5000)
+        try:
+            _ = client.server_info()
+            db = client[str(db_name)]
+            col = db[str(collection_name)]
+            doc = stats.model_dump()
+            res = col.insert_one(doc)
+            if res is None or res.inserted_id is None:
+                raise RuntimeError('Hedger._write_stats: insert failed')
+            self._logger.info(f'hedger_mongo_written id={res.inserted_id}')
+        finally:
+            client.close()

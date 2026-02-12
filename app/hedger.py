@@ -22,6 +22,10 @@ def parse_args():
     p.add_argument('--total-quote', type=float, required=True)
     p.add_argument('--cex-ratio', type=float, default=0.5)
     
+    p.add_argument('--mongo-uri', type=str, default='mongodb://hedging_mongo:27017')
+    p.add_argument('--mongo-db', type=str, default='hedging')
+    p.add_argument('--mongo-collection', type=str, default='hedge_runs')
+    
     p.add_argument('--tick-ms', type=int, default=5)
     p.add_argument('--gtx-cooldown-ms', type=int, default=5)
     p.add_argument('--entrance-timeout-ms', type=int, default=60_000)
@@ -62,6 +66,9 @@ def main():
         price_upper=float(args.price_upper),
         total_quote=float(args.total_quote),
         cex_ratio=float(args.cex_ratio),
+        mongo_uri=str(args.mongo_uri),
+        mongo_db=str(args.mongo_db),
+        mongo_collection=str(args.mongo_collection),
         tick_ms=int(args.tick_ms),
         gtx_cooldown_ms=int(args.gtx_cooldown_ms),
         entrance_timeout_ms=int(args.entrance_timeout_ms),
