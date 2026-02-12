@@ -60,42 +60,24 @@ class Hedger:
         self._wallet_address = str(wallet_address) if wallet_address is not None else None
         
         self._logger = get_logger('hedger')
-        self.last_stats = None
-    
-    def run(self) -> HedgerStats:
-        self.last_stats = None
-        self._validate_config()
         
+        self._exchange = None
+        self._rt = None
+        self._cw = None
+        self._rule = None
+        
+        self.last_stats = None
+        
+        self._validate_config()
+        self._init_clients()
+        self._reset_run_state()
+    
+    def _init_clients(self) -> None:
         exchange = None
         rt = None
-        hedge = None
         cw = None
-        token_id = None
-        
-        mint_res = None
-        pos_state = None
-        dec_res = None
-        col_res = None
-        reb_res = None
-        
-        last_snapshot = None
-        last_snapshot_json = None
-        
-        init_balance0_raw = 0
-        init_balance1_raw = 0
-        final_balance0_raw = 0
-        final_balance1_raw = 0
-        mint_tx_timestamp_ms = 0
-        decrease_tx_timestamp_ms = 0
-        
-        calc_stats = None
-        status = HedgeRunStatus.INITIALIZED
-        error = None
-        main_exc = None
         
         try:
-            self._logger.info(f'hedger_start symbol={self.config.symbol} pool={self.config.pool_address} network={self.config.network}')
-            
             cw = ContractWrapper(
                 rpc_url=str(self.config.rpc_url),
                 pool_address=str(self.config.pool_address),
@@ -104,7 +86,134 @@ class Hedger:
                 wallet_address=str(self._wallet_address) if self._wallet_address is not None else None,
             )
             
-            price_now = float(cw.get_current_traditional_price())
+            ExchangeClass = get_exchange_class('Binance')
+            RealtimeClass = get_realtime_class('Binance')
+            
+            exchange = ExchangeClass(
+                key=str(self._binance_key),
+                secret=str(self._binance_secret),
+                hedge_mode=False,
+                is_realtime=True,
+            )
+            
+            rt = RealtimeClass()
+            rt.start()
+            
+            exchange.wait_for_connect(timeout=60)
+            rt.wait_for_connect(timeout=60)
+            
+            rules = exchange.get_rules()
+            if self.config.symbol not in rules:
+                raise RuntimeError(f'Hedger: rule not found for symbol: {self.config.symbol}')
+            
+            rule = rules[self.config.symbol]
+            
+            if float(rule.price_step) <= 0:
+                raise RuntimeError(f'Hedger: bad price_step for symbol={self.config.symbol}: {rule.price_step}')
+            if float(rule.lot_step) <= 0:
+                raise RuntimeError(f'Hedger: bad lot_step for symbol={self.config.symbol}: {rule.lot_step}')
+            
+            self._cw = cw
+            self._exchange = exchange
+            self._rt = rt
+            self._rule = rule
+            
+            self._logger.info(f'hedger_clients_ready symbol={self.config.symbol} pool={self.config.pool_address} network={self.config.network}')
+        
+        except Exception:
+            init_exc = sys.exc_info()
+            
+            cleanup_errors = []
+            
+            if rt is not None:
+                try:
+                    rt.stop()
+                except Exception as e:
+                    cleanup_errors.append(e)
+            
+            if exchange is not None:
+                try:
+                    exchange.stop()
+                except Exception as e:
+                    cleanup_errors.append(e)
+            
+            _t, exc, tb = init_exc
+            
+            if len(cleanup_errors) > 0:
+                raise RuntimeError(f'Hedger: init failed and cleanup failed too: cleanup_errors={cleanup_errors}') from exc
+            
+            raise exc.with_traceback(tb)
+    
+    def _reset_run_state(self) -> None:
+        self.last_stats = None
+        
+        self._run_hedge = None
+        self._run_token_id = None
+        
+        self._run_mint_res = None
+        self._run_pos_state = None
+        self._run_dec_res = None
+        self._run_col_res = None
+        self._run_reb_res = None
+        
+        self._run_last_snapshot = None
+        self._run_last_snapshot_json = None
+        
+        self._run_init_balance0_raw = 0
+        self._run_init_balance1_raw = 0
+        self._run_final_balance0_raw = 0
+        self._run_final_balance1_raw = 0
+        self._run_mint_tx_timestamp_ms = 0
+        self._run_decrease_tx_timestamp_ms = 0
+        
+        self._run_calc_stats = None
+        self._run_status = HedgeRunStatus.INITIALIZED
+        self._run_error = None
+        self._run_main_exc = None
+    
+    def stop(self) -> None:
+        cleanup_errors = []
+        
+        if self._rt is not None:
+            try:
+                self._logger.info('hedger_rt_stop')
+                self._rt.stop()
+            except Exception as e:
+                cleanup_errors.append(e)
+        
+        if self._exchange is not None:
+            try:
+                self._logger.info('hedger_exchange_stop')
+                self._exchange.stop()
+            except Exception as e:
+                cleanup_errors.append(e)
+        
+        self._rt = None
+        self._exchange = None
+        self._cw = None
+        self._rule = None
+        
+        if len(cleanup_errors) > 0:
+            if len(cleanup_errors) == 1:
+                raise cleanup_errors[0]
+            raise RuntimeError(f'Hedger.stop failed: cleanup_errors={cleanup_errors}')
+    
+    def run(self) -> HedgerStats:
+        self._reset_run_state()
+        
+        if self._exchange is None:
+            raise RuntimeError('Hedger: exchange is not initialized')
+        if self._rt is None:
+            raise RuntimeError('Hedger: realtime is not initialized')
+        if self._cw is None:
+            raise RuntimeError('Hedger: contract wrapper is not initialized')
+        if self._rule is None:
+            raise RuntimeError('Hedger: symbol rule is not initialized')
+        
+        self._logger.info(f'hedger_start symbol={self.config.symbol} pool={self.config.pool_address} network={self.config.network}')
+        
+        try:
+            price_now = float(self._cw.get_current_traditional_price())
             if float(price_now) <= 0:
                 raise RuntimeError(f'Hedger: bad current price: {price_now}')
             
@@ -163,35 +272,11 @@ class Hedger:
             
             self._logger.info(f'hedger_quote total_quote={self.config.total_quote} cex_ratio={self.config.cex_ratio} hedge_quote={hedge_quote}')
             
-            ExchangeClass = get_exchange_class('Binance')
-            RealtimeClass = get_realtime_class('Binance')
-            
-            exchange = ExchangeClass(
-                key=str(self._binance_key),
-                secret=str(self._binance_secret),
-                hedge_mode=False,
-                is_realtime=True,
-            )
-            
-            rt = RealtimeClass()
-            rt.start()
-            
-            exchange.wait_for_connect(timeout=60)
-            rt.wait_for_connect(timeout=60)
-            
-            self._logger.info(f'hedger_live_ready symbol={self.config.symbol}')
-            
-            rules = exchange.get_rules()
-            if self.config.symbol not in rules:
-                raise RuntimeError(f'Hedger: rule not found for symbol: {self.config.symbol}')
-            
-            rule = rules[self.config.symbol]
-            
             trigger_mode = self.config.trigger_mode
             if trigger_mode == CexTriggerMode.ONE_TICK:
-                price_step = float(rule.price_step)
+                price_step = float(self._rule.price_step)
                 if float(price_step) <= 0:
-                    raise RuntimeError(f'Hedger: bad price_step for one_tick mode: {rule.price_step}')
+                    raise RuntimeError(f'Hedger: bad price_step for one_tick mode: {self._rule.price_step}')
                 
                 trigger_offset_pct_x10000 = int(round((float(price_step) / float(price_now)) * 1_000_000.0))
                 if int(trigger_offset_pct_x10000) <= 0:
@@ -208,7 +293,7 @@ class Hedger:
             
             self._logger.info(f'hedger_trigger trigger_mode={trigger_mode.value} trigger_pct={self.config.trigger_pct} trigger_offset_pct_x10000={trigger_offset_pct_x10000} target_offset_pct_x10000={target_offset_pct_x10000}')
             
-            calc_stats = HedgeCalcStats(
+            self._run_calc_stats = HedgeCalcStats(
                 base_price=float(price_now),
                 price_lower=float(price_lower),
                 price_upper=float(price_upper),
@@ -227,7 +312,6 @@ class Hedger:
                     raise RuntimeError(f'on_volume: req is not HedgeVolumeRequest: {type(req)}')
                 if req.symbol != self.config.symbol:
                     raise RuntimeError(f'on_volume: symbol mismatch: req.symbol={req.symbol} config.symbol={self.config.symbol}')
-                
                 if req.leg != HedgeLeg.LONG and req.leg != HedgeLeg.SHORT:
                     raise RuntimeError(f'on_volume: bad leg: {req.leg}')
                 
@@ -235,13 +319,13 @@ class Hedger:
                 if int(price_units) <= 0:
                     raise RuntimeError(f'on_volume: bad price_units: {price_units}')
                 
-                price_step = float(rule.price_step)
-                lot_step = float(rule.lot_step)
+                price_step = float(self._rule.price_step)
+                lot_step = float(self._rule.lot_step)
                 
                 if float(price_step) <= 0:
-                    raise RuntimeError(f'on_volume: bad price_step: {rule.price_step}')
+                    raise RuntimeError(f'on_volume: bad price_step: {self._rule.price_step}')
                 if float(lot_step) <= 0:
-                    raise RuntimeError(f'on_volume: bad lot_step: {rule.lot_step}')
+                    raise RuntimeError(f'on_volume: bad lot_step: {self._rule.lot_step}')
                 
                 price_float = float(price_units) * float(price_step)
                 if float(price_float) <= 0:
@@ -274,77 +358,77 @@ class Hedger:
                 ),
             )
             
-            hedge = HedgeEngine(config=cfg, exchange=exchange, realtime=rt, on_volume=on_volume)
-            hedge.start()
+            self._run_hedge = HedgeEngine(config=cfg, exchange=self._exchange, realtime=self._rt, on_volume=on_volume)
+            self._run_hedge.start()
             
             self._logger.info(f'hedger_hedge_started hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
             
-            token0_address = cw.get_token0_address()
-            token1_address = cw.get_token1_address()
+            token0_address = self._cw.get_token0_address()
+            token1_address = self._cw.get_token1_address()
             
-            init_balance0_raw = int(cw.get_balance(str(token0_address)))
-            init_balance1_raw = int(cw.get_balance(str(token1_address)))
+            self._run_init_balance0_raw = int(self._cw.get_balance(str(token0_address)))
+            self._run_init_balance1_raw = int(self._cw.get_balance(str(token1_address)))
             
-            self._logger.info(f'hedger_init_balances token0={token0_address} token1={token1_address} balance0_raw={init_balance0_raw} balance1_raw={init_balance1_raw}')
+            self._logger.info(f'hedger_init_balances token0={token0_address} token1={token1_address} balance0_raw={self._run_init_balance0_raw} balance1_raw={self._run_init_balance1_raw}')
             
-            status = HedgeRunStatus.RUNNING
+            self._run_status = HedgeRunStatus.RUNNING
             
-            mint_res = cw.add_liquidity_traditional(
+            self._run_mint_res = self._cw.add_liquidity_traditional(
                 fee_pct=float(self.config.fee_pct),
                 total_quote=float(self.config.total_quote),
                 price_lower=float(price_lower),
                 price_upper=float(price_upper),
             )
             
-            if mint_res is None:
+            if self._run_mint_res is None:
                 raise RuntimeError('Hedger: mint_res is None')
-            if not isinstance(mint_res, MintResult):
-                raise RuntimeError(f'Hedger: mint_res is not MintResult: {type(mint_res)}')
-            if not bool(mint_res.ok):
+            if not isinstance(self._run_mint_res, MintResult):
+                raise RuntimeError(f'Hedger: mint_res is not MintResult: {type(self._run_mint_res)}')
+            if not bool(self._run_mint_res.ok):
                 raise RuntimeError('Hedger: add_liquidity_traditional failed')
-            if mint_res.token_id is None or int(mint_res.token_id) <= 0:
+            if self._run_mint_res.token_id is None or int(self._run_mint_res.token_id) <= 0:
                 raise RuntimeError('Hedger: mint token_id is missing')
             
-            token_id = int(mint_res.token_id)
-            mint_tx_timestamp_ms = int(cw.get_tx_timestamp_ms(str(mint_res.tx_hash)))
-            if int(mint_tx_timestamp_ms) <= 0:
-                raise RuntimeError(f'Hedger: bad mint_tx_timestamp_ms: {mint_tx_timestamp_ms}')
+            self._run_token_id = int(self._run_mint_res.token_id)
+            self._run_mint_tx_timestamp_ms = int(self._cw.get_tx_timestamp_ms(str(self._run_mint_res.tx_hash)))
+            if int(self._run_mint_tx_timestamp_ms) <= 0:
+                raise RuntimeError(f'Hedger: bad mint_tx_timestamp_ms: {self._run_mint_tx_timestamp_ms}')
             
-            self._logger.info(f'hedger_minted token_id={token_id} amount_base={mint_res.amount_base} amount_quote={mint_res.amount_quote} tx={mint_res.tx_hash}')
+            self._logger.info(f'hedger_minted token_id={self._run_token_id} amount_base={self._run_mint_res.amount_base} amount_quote={self._run_mint_res.amount_quote} tx={self._run_mint_res.tx_hash}')
             
-            pos_state = cw.get_position_state(int(token_id))
+            self._run_pos_state = self._cw.get_position_state(int(self._run_token_id))
             
-            self._logger.info(f'hedger_position token_id={token_id} price_current={pos_state.price_current} price_lower={pos_state.price_lower} price_upper={pos_state.price_upper}')
+            self._logger.info(f'hedger_position token_id={self._run_token_id} price_current={self._run_pos_state.price_current} price_lower={self._run_pos_state.price_lower} price_upper={self._run_pos_state.price_upper}')
             
             last_mutation_counter = -1
             
             while True:
-                hedge.check()
-                snap = hedge.status()
+                self._run_hedge.check()
+                snap = self._run_hedge.status()
                 
                 mc = int(snap.mutation_counter)
                 if int(mc) != int(last_mutation_counter):
                     last_mutation_counter = int(mc)
-                    last_snapshot = snap
-                    raw = hedge.status_json()
-                    last_snapshot_json = raw.decode('utf-8')
-                    self._logger.info(last_snapshot_json)
+                    self._run_last_snapshot = snap
+                    raw = self._run_hedge.status_json()
+                    self._run_last_snapshot_json = raw.decode('utf-8')
+                    self._logger.info(self._run_last_snapshot_json)
                 
                 if snap.status == HedgeStatus.CLOSED:
-                    status = HedgeRunStatus.FINISHED
+                    self._run_status = HedgeRunStatus.FINISHED
                     self._logger.info(f'hedger_closed hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
                     break
                 
                 if snap.status == HedgeStatus.FAILED:
-                    status = HedgeRunStatus.FAILED
+                    self._run_status = HedgeRunStatus.FAILED
                     self._logger.info(f'hedger_failed hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
                     break
                 
                 time.sleep(0.05)
         
         except Exception:
-            status = HedgeRunStatus.FAILED
-            main_exc = sys.exc_info()
+            self._run_status = HedgeRunStatus.FAILED
+            self._run_main_exc = sys.exc_info()
         
         finally:
             cleanup_errors = []
@@ -355,70 +439,54 @@ class Hedger:
                     cleanup_errors.append(e)
             
             def _cleanup_dex():
-                nonlocal dec_res, col_res, reb_res, final_balance0_raw, final_balance1_raw, decrease_tx_timestamp_ms
-                
-                if token_id is None or cw is None:
+                if self._run_token_id is None:
                     return
                 
                 try:
-                    self._logger.info(f'hedger_decrease_start token_id={token_id}')
-                    dec_res = cw.decrease_liquidity(int(token_id), liquidity_percent=100)
-                    decrease_tx_timestamp_ms = int(cw.get_tx_timestamp_ms(str(dec_res.tx_hash)))
-                    if int(decrease_tx_timestamp_ms) <= 0:
-                        raise RuntimeError(f'Hedger: bad decrease_tx_timestamp_ms: {decrease_tx_timestamp_ms}')
-                    self._logger.info(f'hedger_decrease_done token_id={token_id} ok={dec_res.ok} amount_base={dec_res.amount_base} amount_quote={dec_res.amount_quote}')
+                    self._logger.info(f'hedger_decrease_start token_id={self._run_token_id}')
+                    self._run_dec_res = self._cw.decrease_liquidity(int(self._run_token_id), liquidity_percent=100)
+                    self._run_decrease_tx_timestamp_ms = int(self._cw.get_tx_timestamp_ms(str(self._run_dec_res.tx_hash)))
+                    if int(self._run_decrease_tx_timestamp_ms) <= 0:
+                        raise RuntimeError(f'Hedger: bad decrease_tx_timestamp_ms: {self._run_decrease_tx_timestamp_ms}')
+                    self._logger.info(f'hedger_decrease_done token_id={self._run_token_id} ok={self._run_dec_res.ok} amount_base={self._run_dec_res.amount_base} amount_quote={self._run_dec_res.amount_quote}')
                 except Exception as e:
                     _add_cleanup_error(e)
                 
                 try:
-                    self._logger.info(f'hedger_collect_start token_id={token_id}')
-                    col_res = cw.collect_fees(int(token_id))
-                    self._logger.info(f'hedger_collect_done token_id={token_id} ok={col_res.ok} amount_base={col_res.amount_base} amount_quote={col_res.amount_quote}')
+                    self._logger.info(f'hedger_collect_start token_id={self._run_token_id}')
+                    self._run_col_res = self._cw.collect_fees(int(self._run_token_id))
+                    self._logger.info(f'hedger_collect_done token_id={self._run_token_id} ok={self._run_col_res.ok} amount_base={self._run_col_res.amount_base} amount_quote={self._run_col_res.amount_quote}')
                 except Exception as e:
                     _add_cleanup_error(e)
                 
                 try:
                     self._logger.info('hedger_rebalance_start')
-                    reb_res = self._rebalance(
-                        cw=cw,
-                        init_balance0_raw=int(init_balance0_raw),
-                        init_balance1_raw=int(init_balance1_raw),
+                    self._run_reb_res = self._rebalance(
+                        cw=self._cw,
+                        init_balance0_raw=int(self._run_init_balance0_raw),
+                        init_balance1_raw=int(self._run_init_balance1_raw),
                     )
-                    if reb_res is None:
+                    if self._run_reb_res is None:
                         self._logger.info('hedger_rebalance_skipped')
                     else:
-                        self._logger.info(f'hedger_rebalance_done ok={reb_res.ok} status={reb_res.order.status.value if reb_res.order is not None else None}')
+                        self._logger.info(f'hedger_rebalance_done ok={self._run_reb_res.ok} status={self._run_reb_res.order.status.value if self._run_reb_res.order is not None else None}')
                 except Exception as e:
                     _add_cleanup_error(e)
                 
                 try:
-                    token0_address = cw.get_token0_address()
-                    token1_address = cw.get_token1_address()
-                    final_balance0_raw = int(cw.get_balance(str(token0_address)))
-                    final_balance1_raw = int(cw.get_balance(str(token1_address)))
-                    self._logger.info(f'hedger_final_balances token0={token0_address} token1={token1_address} balance0_raw={final_balance0_raw} balance1_raw={final_balance1_raw}')
+                    token0_address = self._cw.get_token0_address()
+                    token1_address = self._cw.get_token1_address()
+                    self._run_final_balance0_raw = int(self._cw.get_balance(str(token0_address)))
+                    self._run_final_balance1_raw = int(self._cw.get_balance(str(token1_address)))
+                    self._logger.info(f'hedger_final_balances token0={token0_address} token1={token1_address} balance0_raw={self._run_final_balance0_raw} balance1_raw={self._run_final_balance1_raw}')
                 except Exception as e:
                     _add_cleanup_error(e)
             
             def _cleanup_live():
                 try:
-                    if hedge is not None and bool(hedge.started):
+                    if self._run_hedge is not None and bool(self._run_hedge.started):
                         self._logger.info('hedger_hedge_stop')
-                        hedge.stop()
-                except Exception as e:
-                    _add_cleanup_error(e)
-                
-                try:
-                    if rt is not None:
-                        self._logger.info('hedger_rt_stop')
-                        rt.stop()
-                except Exception as e:
-                    _add_cleanup_error(e)
-                
-                try:
-                    if exchange is not None:
-                        self._logger.info('hedger_exchange_stop')
-                        exchange.stop()
+                        self._run_hedge.stop()
                 except Exception as e:
                     _add_cleanup_error(e)
             
@@ -434,37 +502,37 @@ class Hedger:
             if len(cleanup_errors) > 0:
                 self._logger.error(f'hedger_cleanup_errors errors={cleanup_errors}')
             
-            if calc_stats is not None:
+            if self._run_calc_stats is not None:
                 uniswap_stats = UniswapStats(
-                    token_id=int(token_id) if token_id is not None else None,
-                    mint=mint_res,
-                    mint_tx_timestamp_ms=int(mint_tx_timestamp_ms),
-                    position=pos_state,
-                    decrease=dec_res,
-                    decrease_tx_timestamp_ms=int(decrease_tx_timestamp_ms),
-                    collect=col_res,
-                    rebalance=reb_res,
-                    initial_balance0_raw=int(init_balance0_raw),
-                    initial_balance1_raw=int(init_balance1_raw),
-                    final_balance0_raw=int(final_balance0_raw),
-                    final_balance1_raw=int(final_balance1_raw),
+                    token_id=int(self._run_token_id) if self._run_token_id is not None else None,
+                    mint=self._run_mint_res,
+                    mint_tx_timestamp_ms=int(self._run_mint_tx_timestamp_ms),
+                    position=self._run_pos_state,
+                    decrease=self._run_dec_res,
+                    decrease_tx_timestamp_ms=int(self._run_decrease_tx_timestamp_ms),
+                    collect=self._run_col_res,
+                    rebalance=self._run_reb_res,
+                    initial_balance0_raw=int(self._run_init_balance0_raw),
+                    initial_balance1_raw=int(self._run_init_balance1_raw),
+                    final_balance0_raw=int(self._run_final_balance0_raw),
+                    final_balance1_raw=int(self._run_final_balance1_raw),
                 )
                 
                 live_stats = LiveStats(
-                    last_snapshot=last_snapshot,
-                    last_snapshot_json=last_snapshot_json,
+                    last_snapshot=self._run_last_snapshot,
+                    last_snapshot_json=self._run_last_snapshot_json,
                 )
                 
-                if main_exc is not None:
-                    _t, exc, _tb = main_exc
-                    error = str(exc)
+                if self._run_main_exc is not None:
+                    _t, exc, _tb = self._run_main_exc
+                    self._run_error = str(exc)
                 
                 stats = HedgerStats(
-                    status=status,
-                    calc=calc_stats,
+                    status=self._run_status,
+                    calc=self._run_calc_stats,
                     uniswap=uniswap_stats,
                     live=live_stats,
-                    error=error,
+                    error=self._run_error,
                 )
                 
                 self.last_stats = stats
@@ -475,12 +543,12 @@ class Hedger:
                 except Exception as e:
                     cleanup_errors.append(e)
             
-            if main_exc is not None and len(cleanup_errors) > 0:
-                _t, exc, _tb = main_exc
+            if self._run_main_exc is not None and len(cleanup_errors) > 0:
+                _t, exc, _tb = self._run_main_exc
                 raise RuntimeError(f'Hedger failed and cleanup failed too: cleanup_errors={cleanup_errors}') from exc
             
-            if main_exc is not None:
-                _t, exc, tb = main_exc
+            if self._run_main_exc is not None:
+                _t, exc, tb = self._run_main_exc
                 raise exc.with_traceback(tb)
             
             if len(cleanup_errors) > 0:

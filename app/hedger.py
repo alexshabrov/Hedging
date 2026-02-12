@@ -102,52 +102,57 @@ def main():
         private_key=str(private_key),
         wallet_address=str(wallet_address) if wallet_address is not None else None,
     )
-    n_iter = 0
-    while True:
-        run_exc = None
-        stats = None
-        
-        try:
-            stats = hedger.run()
-        except BaseException:
-            run_exc = sys.exc_info()
-        
-        report_exc = None
-        
-        try:
-            report_stats = hedger.last_stats if hedger.last_stats is not None else stats
-            if report_stats is None:
-                raise RuntimeError('hedger.py: report_stats is None')
+    
+    try:
+        n_iter = 0
+        while True:
+            run_exc = None
+            stats = None
             
-            pnl = calc_hedger_pnl_stats(report_stats)
+            try:
+                stats = hedger.run()
+            except BaseException:
+                run_exc = sys.exc_info()
             
-            print(f'Hedger PnL report for iteration {n_iter+1}:')
-            print(f'  CEX PnL: {float(pnl.cex_pnl_quote):.8f}')
-            print(f'  DEX PnL (realized IL): {float(pnl.dex_realized_il_quote):.8f}')
-            print(f'  Fees received: {float(pnl.fees_received_quote):.8f}')
-            print(f'  Gas paid (ETH): {float(pnl.gas_paid_eth):.8f}')
-            print(f'  Gas paid (quote): {float(pnl.gas_paid_quote):.8f}')
-            print(f'  Pool hold seconds: {float(pnl.pool_hold_seconds):.3f}')
-            print(f'  APR (%): {float(pnl.apr_pct):.6f}')
-            print(f'  Total PnL: {float(pnl.total_pnl_quote):.8f}')
-        except Exception:
-            report_exc = sys.exc_info()
-        
-        if run_exc is not None and report_exc is not None:
-            _t_run, exc_run, _tb_run = run_exc
-            _t_report, exc_report, _tb_report = report_exc
-            raise RuntimeError(f'hedger.py: run failed ({exc_run}) and report failed ({exc_report})') from exc_run
-        
-        if report_exc is not None:
-            _t, exc, tb = report_exc
-            raise exc.with_traceback(tb)
-        
-        if run_exc is not None:
-            _t, exc, tb = run_exc
-            raise exc.with_traceback(tb)
-        
-        if not bool(args.loop):
-            break
+            report_exc = None
+            
+            try:
+                report_stats = hedger.last_stats if hedger.last_stats is not None else stats
+                if report_stats is None:
+                    raise RuntimeError('hedger.py: report_stats is None')
+                
+                pnl = calc_hedger_pnl_stats(report_stats)
+                
+                print(f'Hedger PnL report for iteration {n_iter+1}:')
+                print(f'  CEX PnL: {float(pnl.cex_pnl_quote):.8f}')
+                print(f'  DEX PnL (realized IL): {float(pnl.dex_realized_il_quote):.8f}')
+                print(f'  Fees received: {float(pnl.fees_received_quote):.8f}')
+                print(f'  Gas paid (ETH): {float(pnl.gas_paid_eth):.8f}')
+                print(f'  Gas paid (quote): {float(pnl.gas_paid_quote):.8f}')
+                print(f'  Pool hold seconds: {float(pnl.pool_hold_seconds):.3f}')
+                print(f'  APR (%): {float(pnl.apr_pct):.6f}')
+                print(f'  Total PnL: {float(pnl.total_pnl_quote):.8f}')
+            except Exception:
+                report_exc = sys.exc_info()
+            
+            if run_exc is not None and report_exc is not None:
+                _t_run, exc_run, _tb_run = run_exc
+                _t_report, exc_report, _tb_report = report_exc
+                raise RuntimeError(f'hedger.py: run failed ({exc_run}) and report failed ({exc_report})') from exc_run
+            
+            if report_exc is not None:
+                _t, exc, tb = report_exc
+                raise exc.with_traceback(tb)
+            
+            if run_exc is not None:
+                _t, exc, tb = run_exc
+                raise exc.with_traceback(tb)
+            
+            if not bool(args.loop):
+                break
+    
+    finally:
+        hedger.stop()
 
 
 if __name__ == '__main__':
