@@ -1,14 +1,16 @@
 """
 Runs frontend module
 Date: 2026-02-13
-Version: 1.0
+Version: 2.0
 """
 import sys
+from typing import Optional
 
-import orjson
-from flask import Flask, Response, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, url_for
 
+from models.hedger_models import CexTriggerMode
 from modules.frontend.auth import login_required
+from modules.frontend.models.frontend_models import FrontendStartRunForm
 from modules.frontend.services.frontend_service import FrontendService
 
 
@@ -28,12 +30,9 @@ class RunsModule:
         @login_required
         def runs_start_page():
             if request.method == 'POST':
-                if 'start_payload' not in request.form:
-                    raise RuntimeError('runs_start_page: start_payload is missing in form')
-                raw = str(request.form['start_payload'])
-
                 try:
-                    run_id = self._service.start_run_from_json(raw)
+                    form = self._read_start_form()
+                    run_id = self._service.start_run(form)
                     flash(f'Run started: {run_id}')
                     return redirect(url_for('run_details_page', run_id=run_id))
                 except Exception:
@@ -65,50 +64,50 @@ class RunsModule:
             view = self._service.get_iteration_details(str(iteration_id))
             return render_template('modules/iteration_details.html', title='Iteration details', details=view.model_dump())
 
-        @app.route('/api/frontend/runs/start', methods=['POST'])
-        def runs_start_api():
-            payload = self._read_json_body()
-            if 'config' not in payload:
-                raise RuntimeError('runs_start_api: config is missing in payload')
-            run_id = self._service.start_run_from_json(orjson.dumps(payload).decode('utf-8'))
-            return self._json_response({'ok': True, 'run_id': run_id}, 200)
+    def _read_start_form(self) -> FrontendStartRunForm:
+        return FrontendStartRunForm(
+            symbol=self._read_str('symbol'),
+            rpc_url=self._read_str('rpc_url'),
+            network=self._read_str('network'),
+            pool_address=self._read_str('pool_address'),
+            fee_pct=self._read_float('fee_pct'),
+            price_lower=self._read_optional_float('price_lower'),
+            price_upper=self._read_optional_float('price_upper'),
+            price_lower_pct=self._read_optional_float('price_lower_pct'),
+            price_upper_pct=self._read_optional_float('price_upper_pct'),
+            total_quote=self._read_float('total_quote'),
+            cex_ratio=self._read_float('cex_ratio'),
+            trigger_mode=CexTriggerMode(self._read_str('trigger_mode')),
+            trigger_pct=self._read_float('trigger_pct'),
+            mongo_uri=self._read_str('mongo_uri'),
+            mongo_db=self._read_str('mongo_db'),
+            mongo_collection=self._read_str('mongo_collection'),
+            tick_ms=self._read_int('tick_ms'),
+            gtx_cooldown_ms=self._read_int('gtx_cooldown_ms'),
+            entrance_timeout_ms=self._read_int('entrance_timeout_ms'),
+            cowswap_api_timeout_sec=self._read_int('cowswap_api_timeout_sec'),
+            cowswap_wait_timeout_sec=self._read_int('cowswap_wait_timeout_sec'),
+            cowswap_poll_interval_sec=self._read_int('cowswap_poll_interval_sec'),
+        )
 
-        @app.route('/api/frontend/runs/<run_id>/stop', methods=['POST'])
-        def run_stop_api(run_id: str):
-            self._service.stop_run(str(run_id))
-            return self._json_response({'ok': True, 'run_id': str(run_id)}, 200)
+    def _read_str(self, key: str) -> str:
+        if key not in request.form:
+            raise RuntimeError(f'RunsModule._read_str: {key} is missing in form')
+        value = str(request.form[key]).strip()
+        if len(value) == 0:
+            raise RuntimeError(f'RunsModule._read_str: {key} is empty')
+        return value
 
-        @app.route('/api/frontend/runs/<run_id>', methods=['GET'])
-        def run_details_api(run_id: str):
-            view = self._service.get_run_details(str(run_id))
-            return self._json_response({'ok': True, 'item': view.model_dump()}, 200)
+    def _read_float(self, key: str) -> float:
+        return float(self._read_str(key))
 
-        @app.route('/api/frontend/iterations/<iteration_id>', methods=['GET'])
-        def iteration_details_api(iteration_id: str):
-            view = self._service.get_iteration_details(str(iteration_id))
-            return self._json_response({'ok': True, 'item': view.model_dump()}, 200)
+    def _read_int(self, key: str) -> int:
+        return int(self._read_str(key))
 
-        @app.route('/api/frontend/runtime/positions', methods=['GET'])
-        def runtime_positions_api():
-            rows = self._service.list_runtime_positions()
-            return self._json_response({'ok': True, 'items': rows}, 200)
-
-        @app.route('/api/frontend/health', methods=['GET'])
-        def frontend_health_api():
-            return self._json_response({'ok': True}, 200)
-
-    def _json_response(self, payload: dict, status_code: int) -> Response:
-        body = orjson.dumps(payload)
-        return Response(response=body, status=int(status_code), mimetype='application/json')
-
-    def _read_json_body(self) -> dict:
-        raw = request.get_data(cache=False, as_text=False)
-        if raw is None:
-            raise RuntimeError('RunsModule._read_json_body: body is None')
+    def _read_optional_float(self, key: str) -> Optional[float]:
+        if key not in request.form:
+            raise RuntimeError(f'RunsModule._read_optional_float: {key} is missing in form')
+        raw = str(request.form[key]).strip()
         if len(raw) == 0:
-            raise RuntimeError('RunsModule._read_json_body: empty body')
-
-        payload = orjson.loads(raw)
-        if not isinstance(payload, dict):
-            raise RuntimeError(f'RunsModule._read_json_body: payload is not dict: {type(payload)}')
-        return payload
+            return None
+        return float(raw)

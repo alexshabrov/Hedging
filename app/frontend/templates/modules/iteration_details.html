@@ -31,11 +31,95 @@
                             </tbody>
                         </table>
 
-                        <h5>Raw stats</h5>
-                        <pre class="json-block">{{ details.stats | tojson(indent=2) }}</pre>
+                        <h5>LP block</h5>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Base price</th><td>{{ '%.6f'|format(details.lp.base_price) }}</td></tr>
+                                <tr><th>Price lower</th><td>{{ '%.6f'|format(details.lp.price_lower) }}</td></tr>
+                                <tr><th>Price upper</th><td>{{ '%.6f'|format(details.lp.price_upper) }}</td></tr>
+                                <tr><th>Minted base</th><td>{{ '%.6f'|format(details.lp.minted_base) }}</td></tr>
+                                <tr><th>Minted quote</th><td>{{ '%.6f'|format(details.lp.minted_quote) }}</td></tr>
+                                <tr><th>Closed base</th><td>{{ '%.6f'|format(details.lp.closed_base) }}</td></tr>
+                                <tr><th>Closed quote</th><td>{{ '%.6f'|format(details.lp.closed_quote) }}</td></tr>
+                                <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.lp.fees_quote) }}</td></tr>
+                                <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.lp.price_pnl_quote) }}</td></tr>
+                                <tr><th>Impermanent loss quote</th><td>{{ '%.6f'|format(details.lp.impermanent_loss_quote) }}</td></tr>
+                                <tr><th>APR fees (%)</th><td>{{ '%.6f'|format(details.lp.apr_fees_pct) }}</td></tr>
+                                <tr><th>APR price (%)</th><td>{{ '%.6f'|format(details.lp.apr_price_pct) }}</td></tr>
+                                <tr><th>APR total (%)</th><td>{{ '%.6f'|format(details.lp.apr_total_pct) }}</td></tr>
+                            </tbody>
+                        </table>
 
-                        <h5>Raw pnl</h5>
-                        <pre class="json-block">{{ details.pnl | tojson(indent=2) }}</pre>
+                        <h5>Hedge block</h5>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Activated</th><td>{{ details.hedge.activated }}</td></tr>
+                                <tr><th>Activation price</th><td>{{ details.hedge.activation_price }}</td></tr>
+                                <tr><th>Hedge quote</th><td>{{ '%.6f'|format(details.hedge.hedge_quote) }}</td></tr>
+                                <tr><th>Opened leg</th><td>{{ details.hedge.opened_leg }}</td></tr>
+                                <tr><th>Opened base units</th><td>{{ details.hedge.opened_base_units }}</td></tr>
+                                <tr><th>CEX PnL quote</th><td>{{ '%.6f'|format(details.hedge.cex_pnl_quote) }}</td></tr>
+                                <tr><th>Realized PnL units</th><td>{{ details.hedge.realized_pnl_quote_units }}</td></tr>
+                                <tr><th>Unrealized PnL units</th><td>{{ details.hedge.unrealized_pnl_quote_units }}</td></tr>
+                                <tr><th>Opened (UTC)</th><td>{{ utc_ts(details.hedge.opened_ms) }}</td></tr>
+                                <tr><th>Closed (UTC)</th><td>{{ utc_ts(details.hedge.closed_ms) }}</td></tr>
+                                <tr><th>Close reason</th><td>{{ details.hedge.close_reason }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5>Rebalance block</h5>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Swap ok</th><td>{{ details.rebalance.swap_ok }}</td></tr>
+                                <tr><th>Swap error</th><td>{{ details.rebalance.swap_error }}</td></tr>
+                                <tr><th>Sell amount</th><td>{{ details.rebalance.sell_amount }}</td></tr>
+                                <tr><th>Buy amount</th><td>{{ details.rebalance.buy_amount }}</td></tr>
+                                <tr><th>Execution fee</th><td>{{ details.rebalance.execution_fee }}</td></tr>
+                                <tr><th>Fee token</th><td>{{ details.rebalance.fee_token }}</td></tr>
+                                <tr><th>Elapsed sec</th><td>{{ details.rebalance.elapsed_sec }}</td></tr>
+                                <tr><th>Order status</th><td>{{ details.rebalance.order_status }}</td></tr>
+                                <tr><th>Order url</th><td>{{ details.rebalance.order_url }}</td></tr>
+                                <tr><th>Swap cost quote</th><td>{{ '%.6f'|format(details.rebalance.swap_cost_quote) }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5>Hedge chases</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Kind</th>
+                                    <th>Started</th>
+                                    <th>Finished</th>
+                                    <th>Side</th>
+                                    <th>Filled base</th>
+                                    <th>Filled quote</th>
+                                    <th>Avg price units</th>
+                                    <th>Slippage x10000</th>
+                                    <th>GTX violations</th>
+                                    <th>Exchange errors</th>
+                                    <th>OK</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for chase in details.hedge_chases %}
+                                    <tr>
+                                        <td>{{ chase.kind }}</td>
+                                        <td>{{ utc_ts(chase.started_ms) }}</td>
+                                        <td>{{ utc_ts(chase.finished_ms) }}</td>
+                                        <td>{{ chase.order_side }}</td>
+                                        <td>{{ chase.filled_base_units }}</td>
+                                        <td>{{ chase.filled_quote_units }}</td>
+                                        <td>{{ chase.avg_price_units }}</td>
+                                        <td>{{ chase.slippage_pct_x10000 }}</td>
+                                        <td>{{ chase.gtx_violations }}</td>
+                                        <td>{{ chase.exchange_errors }}</td>
+                                        <td>{{ chase.ok }}</td>
+                                        <td>{{ chase.error }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

@@ -57,14 +57,9 @@ python app/frontend/app.py
 - `/iterations/<iteration_id>` — детальная карточка итерации
 
 ==================================================
-5) REST frontend API
+5) Принцип интерфейса
 ==================================================
 
-- `GET /api/frontend/health`
-- `GET /api/frontend/dashboard`
-- `GET /api/frontend/positions`
-- `GET /api/frontend/runs/<run_id>`
-- `GET /api/frontend/iterations/<iteration_id>`
-- `GET /api/frontend/runtime/positions`
-- `POST /api/frontend/runs/start`
-- `POST /api/frontend/runs/<run_id>/stop`
+- Ввод данных в frontend только через HTML-формы.
+- Вывод данных только в HTML-страницах.
+- JSON ввод/вывод на уровне frontend не используется.

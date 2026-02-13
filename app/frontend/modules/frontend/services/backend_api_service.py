@@ -1,15 +1,21 @@
 """
 Backend API client service
 Date: 2026-02-13
-Version: 1.0
+Version: 2.0
 """
 import urllib.error
 import urllib.request
-from typing import Dict, List
+from typing import List, Optional
 
 import orjson
 
 from live.lib.logger import get_logger
+from models.backend_models import BackendPositionView, BackendStartRunRequest
+from modules.frontend.models.frontend_models import (
+    FrontendBackendPositionsResponse,
+    FrontendBackendStartRunResponse,
+    FrontendBackendStopRunResponse,
+)
 
 
 class BackendApiService:
@@ -25,63 +31,40 @@ class BackendApiService:
         self._timeout_sec = int(timeout_sec)
         self._logger = get_logger('frontend_backend_api')
 
-    def health(self) -> dict:
+    def health(self):
         return self._request_json('GET', '/api/health', None)
 
-    def start_run(self, payload: dict) -> str:
-        if payload is None:
-            raise RuntimeError('BackendApiService.start_run: payload is None')
-        if not isinstance(payload, dict):
-            raise RuntimeError(f'BackendApiService.start_run: payload is not dict: {type(payload)}')
+    def start_run(self, req: BackendStartRunRequest) -> str:
+        if req is None:
+            raise RuntimeError('BackendApiService.start_run: req is None')
+        if not isinstance(req, BackendStartRunRequest):
+            raise RuntimeError(f'BackendApiService.start_run: req is not BackendStartRunRequest: {type(req)}')
 
-        res = self._request_json('POST', '/api/runs/start', payload)
-
-        if 'ok' not in res:
-            raise RuntimeError('BackendApiService.start_run: ok is missing in response')
-        if bool(res['ok']) is not True:
-            if 'error' not in res:
-                raise RuntimeError('BackendApiService.start_run: backend returned not ok without error')
-            raise RuntimeError(f"BackendApiService.start_run: backend error: {res['error']}")
-        if 'run_id' not in res:
-            raise RuntimeError('BackendApiService.start_run: run_id is missing in response')
-
-        return str(res['run_id'])
+        res = self._request_json('POST', '/api/runs/start', req.model_dump())
+        parsed = FrontendBackendStartRunResponse.from_dict(res)
+        if not bool(parsed.ok):
+            raise RuntimeError(f'BackendApiService.start_run: backend error: {parsed.error}')
+        if parsed.run_id is None:
+            raise RuntimeError('BackendApiService.start_run: parsed.run_id is None')
+        return str(parsed.run_id)
 
     def stop_run(self, run_id: str) -> None:
         if not isinstance(run_id, str) or len(run_id) == 0:
             raise RuntimeError('BackendApiService.stop_run: run_id is empty')
 
         res = self._request_json('POST', f'/api/runs/{run_id}/stop', None)
+        parsed = FrontendBackendStopRunResponse.from_dict(res)
+        if not bool(parsed.ok):
+            raise RuntimeError(f'BackendApiService.stop_run: backend error: {parsed.error}')
 
-        if 'ok' not in res:
-            raise RuntimeError('BackendApiService.stop_run: ok is missing in response')
-        if bool(res['ok']) is not True:
-            if 'error' not in res:
-                raise RuntimeError('BackendApiService.stop_run: backend returned not ok without error')
-            raise RuntimeError(f"BackendApiService.stop_run: backend error: {res['error']}")
-
-    def list_runtime_positions(self) -> List[Dict]:
+    def list_runtime_positions(self) -> List[BackendPositionView]:
         res = self._request_json('GET', '/api/positions', None)
+        parsed = FrontendBackendPositionsResponse.from_dict(res)
+        if not bool(parsed.ok):
+            raise RuntimeError(f'BackendApiService.list_runtime_positions: backend error: {parsed.error}')
+        return parsed.items
 
-        if 'ok' not in res:
-            raise RuntimeError('BackendApiService.list_runtime_positions: ok is missing in response')
-        if bool(res['ok']) is not True:
-            if 'error' not in res:
-                raise RuntimeError('BackendApiService.list_runtime_positions: backend returned not ok without error')
-            raise RuntimeError(f"BackendApiService.list_runtime_positions: backend error: {res['error']}")
-        if 'items' not in res:
-            raise RuntimeError('BackendApiService.list_runtime_positions: items is missing in response')
-        if not isinstance(res['items'], list):
-            raise RuntimeError(f"BackendApiService.list_runtime_positions: items is not list: {type(res['items'])}")
-
-        out = []
-        for row in res['items']:
-            if not isinstance(row, dict):
-                raise RuntimeError(f'BackendApiService.list_runtime_positions: row is not dict: {type(row)}')
-            out.append(dict(row))
-        return out
-
-    def _request_json(self, method: str, path: str, payload: dict):
+    def _request_json(self, method: str, path: str, payload: Optional[dict]):
         if not isinstance(method, str) or len(method) == 0:
             raise RuntimeError('BackendApiService._request_json: method is empty')
         if not isinstance(path, str) or len(path) == 0:

@@ -1,10 +1,9 @@
 """
 Positions frontend module
 Date: 2026-02-13
-Version: 1.0
+Version: 2.0
 """
-import orjson
-from flask import Flask, Response, render_template
+from flask import Flask, render_template
 
 from modules.frontend.auth import login_required
 from modules.frontend.services.frontend_service import FrontendService
@@ -31,16 +30,3 @@ class PositionsModule:
                 rows.append(row.model_dump())
 
             return render_template('modules/positions.html', title='Positions', rows=rows)
-
-        @app.route('/api/frontend/positions', methods=['GET'])
-        def positions_api():
-            rows_raw = self._service.list_positions()
-            rows = []
-            for row in rows_raw:
-                rows.append(row.model_dump())
-
-            return self._json_response({'ok': True, 'items': rows}, 200)
-
-    def _json_response(self, payload: dict, status_code: int) -> Response:
-        body = orjson.dumps(payload)
-        return Response(response=body, status=int(status_code), mimetype='application/json')
