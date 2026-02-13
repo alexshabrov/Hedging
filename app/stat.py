@@ -61,6 +61,48 @@ def _pnl_to_csv_row(run_id: str, pnl: HedgerPnlStats) -> dict:
     }
 
 
+def _calc_column_stats(rows: list) -> dict:
+    if rows is None:
+        raise RuntimeError('stat.py: rows is None')
+    if not isinstance(rows, list):
+        raise RuntimeError(f'stat.py: rows is not list: {type(rows)}')
+    
+    sums = {
+        'cex_pnl_quote': 0.0,
+        'dex_realized_il_quote': 0.0,
+        'fees_received_quote': 0.0,
+        'gas_paid_eth': 0.0,
+        'gas_paid_quote': 0.0,
+        'pool_hold_seconds': 0.0,
+        'total_pnl_quote': 0.0,
+    }
+    apr_pct_sum = 0.0
+    row_count = 0
+    
+    for row in rows:
+        if row is None:
+            raise RuntimeError('stat.py: row is None')
+        if not isinstance(row, dict):
+            raise RuntimeError(f'stat.py: row is not dict: {type(row)}')
+        
+        sums['cex_pnl_quote'] += float(row['cex_pnl_quote'])
+        sums['dex_realized_il_quote'] += float(row['dex_realized_il_quote'])
+        sums['fees_received_quote'] += float(row['fees_received_quote'])
+        sums['gas_paid_eth'] += float(row['gas_paid_eth'])
+        sums['gas_paid_quote'] += float(row['gas_paid_quote'])
+        sums['pool_hold_seconds'] += float(row['pool_hold_seconds'])
+        apr_pct_sum += float(row['apr_pct'])
+        sums['total_pnl_quote'] += float(row['total_pnl_quote'])
+        row_count += 1
+    
+    if int(row_count) <= 0:
+        raise RuntimeError('stat.py: rows is empty, cannot compute apr_pct average')
+    
+    sums['apr_pct_avg'] = float(apr_pct_sum) / float(row_count)
+    
+    return sums
+
+
 ### Main ###
 def main():
     args = parse_args()
@@ -128,6 +170,18 @@ def main():
             w.writeheader()
             for row in rows:
                 w.writerow(row)
+        
+        sums = _calc_column_stats(rows)
+        
+        print('Hedger PnL column sums:')
+        print(f'  cex_pnl_quote: {float(sums["cex_pnl_quote"]):.8f}')
+        print(f'  dex_realized_il_quote: {float(sums["dex_realized_il_quote"]):.8f}')
+        print(f'  fees_received_quote: {float(sums["fees_received_quote"]):.8f}')
+        print(f'  gas_paid_eth: {float(sums["gas_paid_eth"]):.8f}')
+        print(f'  gas_paid_quote: {float(sums["gas_paid_quote"]):.8f}')
+        print(f'  pool_hold_seconds: {float(sums["pool_hold_seconds"]):.3f}')
+        print(f'  apr_pct_avg: {float(sums["apr_pct_avg"]):.6f}')
+        print(f'  total_pnl_quote: {float(sums["total_pnl_quote"]):.8f}')
         
         logger.info(f'stat_export_done rows={len(rows)} skipped={skipped} output_csv={out_path}')
     finally:
