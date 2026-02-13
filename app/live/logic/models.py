@@ -259,6 +259,103 @@ class HedgeSnapshot(StrictModel):
             'metrics': self.metrics.model_dump(),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'HedgeSnapshot':
+        if data is None:
+            raise RuntimeError('HedgeSnapshot.from_dict: data is None')
+        if not isinstance(data, dict):
+            raise RuntimeError(f'HedgeSnapshot.from_dict: data is not dict: {type(data)}')
+
+        metrics_raw = data['metrics']
+        if metrics_raw is None:
+            raise RuntimeError('HedgeSnapshot.from_dict: metrics is None')
+        if not isinstance(metrics_raw, dict):
+            raise RuntimeError(f'HedgeSnapshot.from_dict: metrics is not dict: {type(metrics_raw)}')
+
+        chases_raw = metrics_raw['chases']
+        if chases_raw is None:
+            raise RuntimeError('HedgeSnapshot.from_dict: metrics.chases is None')
+        if not isinstance(chases_raw, list):
+            raise RuntimeError(f'HedgeSnapshot.from_dict: metrics.chases is not list: {type(chases_raw)}')
+
+        chases = []
+        for item in chases_raw:
+            if item is None:
+                raise RuntimeError('HedgeSnapshot.from_dict: chase is None')
+            if not isinstance(item, dict):
+                raise RuntimeError(f'HedgeSnapshot.from_dict: chase is not dict: {type(item)}')
+
+            chases.append(
+                HedgeChaseMetrics(
+                    cmd_id=str(item['cmd_id']),
+                    kind=HedgeChaseKind(str(item['kind'])),
+                    started_ms=int(item['started_ms']),
+                    finished_ms=int(item['finished_ms']),
+                    order_side=str(item['order_side']),
+                    intended_price_units=int(item['intended_price_units']),
+                    target_base_units=int(item['target_base_units']),
+                    filled_base_units=int(item['filled_base_units']),
+                    filled_quote_units=int(item['filled_quote_units']),
+                    orders_created=int(item['orders_created']),
+                    fills=int(item['fills']),
+                    gtx_violations=int(item['gtx_violations']),
+                    exchange_errors=int(item['exchange_errors']),
+                    ok=None if item['ok'] is None else bool(item['ok']),
+                    error=None if item['error'] is None else str(item['error']),
+                    avg_price_units=int(item['avg_price_units']),
+                    slippage_pct_x10000=int(item['slippage_pct_x10000']),
+                )
+            )
+
+        metrics = HedgeMetrics(
+            last_mid_price_units=int(metrics_raw['last_mid_price_units']),
+            base_balance_units=int(metrics_raw['base_balance_units']),
+            quote_balance_units=int(metrics_raw['quote_balance_units']),
+            quote_turnover_units=int(metrics_raw['quote_turnover_units']),
+            realized_pnl_quote_units=int(metrics_raw['realized_pnl_quote_units']),
+            unrealized_pnl_quote_units=int(metrics_raw['unrealized_pnl_quote_units']),
+            trigger_ms=int(metrics_raw['trigger_ms']),
+            opened_ms=int(metrics_raw['opened_ms']),
+            close_trigger_ms=int(metrics_raw['close_trigger_ms']),
+            closed_ms=int(metrics_raw['closed_ms']),
+            chases=chases,
+            neutral_excursions_pct_x10000=[int(x) for x in metrics_raw['neutral_excursions_pct_x10000']],
+        )
+
+        lines_raw = data['lines']
+        lines = None if lines_raw is None else HedgeLines(
+            top_target_units=int(lines_raw['top_target_units']),
+            btm_target_units=int(lines_raw['btm_target_units']),
+            top_threshold_units=int(lines_raw['top_threshold_units']),
+            btm_threshold_units=int(lines_raw['btm_threshold_units']),
+        )
+
+        stats_raw = data['stats']
+        if stats_raw is None:
+            raise RuntimeError('HedgeSnapshot.from_dict: stats is None')
+        if not isinstance(stats_raw, dict):
+            raise RuntimeError(f'HedgeSnapshot.from_dict: stats is not dict: {type(stats_raw)}')
+
+        return cls(
+            hedge_id=str(data['hedge_id']),
+            symbol=str(data['symbol']),
+            status=HedgeStatus(str(data['status'])),
+            started_ms=int(data['started_ms']),
+            updated_ms=int(data['updated_ms']),
+            mutation_counter=int(data['mutation_counter']),
+            base_price_units=int(data['base_price_units']),
+            lines=lines,
+            opened_leg=None if data['opened_leg'] is None else HedgeLeg(str(data['opened_leg'])),
+            opened_base_units=int(data['opened_base_units']),
+            last_error=None if data['last_error'] is None else str(data['last_error']),
+            stats=HedgeStats(
+                chases_started=int(stats_raw['chases_started']),
+                chases_done=int(stats_raw['chases_done']),
+                position_events=int(stats_raw['position_events']),
+            ),
+            metrics=metrics,
+        )
+
 
 class _HedgeState(StrictModel):
     status: HedgeStatus = HedgeStatus.INITIALIZED

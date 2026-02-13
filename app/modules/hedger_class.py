@@ -24,12 +24,11 @@ from live.logic.models import (
 from dex.contract.contract_wrapper import ContractWrapper
 from dex.swappers.swapper_factory import SwapperFactory
 from dex.models.swapper_models import CowSwapConfig, SwapRequest, SwapperType, SwapResult
-from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult
+from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, DexRunStats
 
 from models.hedger_models import (
     HedgerConfig,
     HedgeCalcStats,
-    UniswapStats,
     LiveStats,
     HedgerStats,
     HedgeRunStatus,
@@ -157,7 +156,6 @@ class Hedger:
         self._run_reb_res = None
         
         self._run_last_snapshot = None
-        self._run_last_snapshot_json = None
         
         self._run_init_balance0_raw = 0
         self._run_init_balance1_raw = 0
@@ -410,9 +408,7 @@ class Hedger:
                 if int(mc) != int(last_mutation_counter):
                     last_mutation_counter = int(mc)
                     self._run_last_snapshot = snap
-                    raw = self._run_hedge.status_json()
-                    self._run_last_snapshot_json = raw.decode('utf-8')
-                    self._logger.info(self._run_last_snapshot_json)
+                    self._logger.info(f'hedger_snapshot_update mutation_counter={mc} status={snap.status.value}')
                 
                 if snap.status == HedgeStatus.CLOSED:
                     self._run_status = HedgeRunStatus.FINISHED
@@ -503,7 +499,7 @@ class Hedger:
                 self._logger.error(f'hedger_cleanup_errors errors={cleanup_errors}')
             
             if self._run_calc_stats is not None:
-                uniswap_stats = UniswapStats(
+                uniswap_stats = DexRunStats(
                     token_id=int(self._run_token_id) if self._run_token_id is not None else None,
                     mint=self._run_mint_res,
                     mint_tx_timestamp_ms=int(self._run_mint_tx_timestamp_ms),
@@ -520,7 +516,6 @@ class Hedger:
                 
                 live_stats = LiveStats(
                     last_snapshot=self._run_last_snapshot,
-                    last_snapshot_json=self._run_last_snapshot_json,
                 )
                 
                 if self._run_main_exc is not None:

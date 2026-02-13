@@ -5,6 +5,7 @@ Version: 1.0
 """
 from typing import Optional
 from dex.lib.strict_model import StrictModel
+from dex.models.swapper_models import SwapResult
 
 # Mint result
 class MintResult(StrictModel):
@@ -214,4 +215,57 @@ class PositionState(StrictModel):
             amount_quote=float(data['amount_quote']),
             uncollected_base=float(data['uncollected_base']),
             uncollected_quote=float(data['uncollected_quote']),
+        )
+
+
+class DexRunStats(StrictModel):
+    token_id: Optional[int]
+    mint: Optional[MintResult]
+    mint_tx_timestamp_ms: int
+    position: Optional[PositionState]
+    decrease: Optional[DecreaseLiquidityResult]
+    decrease_tx_timestamp_ms: int
+    collect: Optional[CollectFeesResult]
+    rebalance: Optional[SwapResult]
+    initial_balance0_raw: int
+    initial_balance1_raw: int
+    final_balance0_raw: int
+    final_balance1_raw: int
+
+    def model_dump(self) -> dict:  # type: ignore[override]
+        return {
+            'token_id': self.token_id,
+            'mint': None if self.mint is None else self.mint.model_dump(),
+            'mint_tx_timestamp_ms': int(self.mint_tx_timestamp_ms),
+            'position': None if self.position is None else self.position.model_dump(),
+            'decrease': None if self.decrease is None else self.decrease.model_dump(),
+            'decrease_tx_timestamp_ms': int(self.decrease_tx_timestamp_ms),
+            'collect': None if self.collect is None else self.collect.model_dump(),
+            'rebalance': None if self.rebalance is None else self.rebalance.model_dump(),
+            'initial_balance0_raw': int(self.initial_balance0_raw),
+            'initial_balance1_raw': int(self.initial_balance1_raw),
+            'final_balance0_raw': int(self.final_balance0_raw),
+            'final_balance1_raw': int(self.final_balance1_raw),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DexRunStats':
+        if data is None:
+            raise RuntimeError('DexRunStats.from_dict: data is None')
+        if not isinstance(data, dict):
+            raise RuntimeError(f'DexRunStats.from_dict: data is not dict: {type(data)}')
+
+        return cls(
+            token_id=None if data['token_id'] is None else int(data['token_id']),
+            mint=None if data['mint'] is None else MintResult.from_dict(data['mint']),
+            mint_tx_timestamp_ms=int(data['mint_tx_timestamp_ms']),
+            position=None if data['position'] is None else PositionState.from_dict(data['position']),
+            decrease=None if data['decrease'] is None else DecreaseLiquidityResult.from_dict(data['decrease']),
+            decrease_tx_timestamp_ms=int(data['decrease_tx_timestamp_ms']),
+            collect=None if data['collect'] is None else CollectFeesResult.from_dict(data['collect']),
+            rebalance=None if data['rebalance'] is None else SwapResult.from_dict(data['rebalance']),
+            initial_balance0_raw=int(data['initial_balance0_raw']),
+            initial_balance1_raw=int(data['initial_balance1_raw']),
+            final_balance0_raw=int(data['final_balance0_raw']),
+            final_balance1_raw=int(data['final_balance1_raw']),
         )
