@@ -7,13 +7,13 @@ import os
 
 from flask import Flask, redirect, request, url_for
 
-from frontend.modules.frontend.auth import login_required
-from frontend.modules.frontend.pages.dashboard_module import DashboardModule
-from frontend.modules.frontend.pages.positions_module import PositionsModule
-from frontend.modules.frontend.pages.runs_module import RunsModule
-from frontend.modules.frontend.services.backend_api_service import BackendApiService
-from frontend.modules.frontend.services.frontend_service import FrontendService
-from frontend.modules.frontend.services.storage_service import StorageService
+from frontend.modules.auth import login_required
+from frontend.modules.pages.dashboard_module import DashboardModule
+from frontend.modules.pages.positions_module import PositionsModule
+from frontend.modules.pages.runs_module import RunsModule
+from frontend.modules.services.backend_api_service import BackendApiService
+from frontend.modules.services.frontend_service import FrontendService
+from frontend.modules.services.storage_service import StorageService
 
 
 class Frontend:

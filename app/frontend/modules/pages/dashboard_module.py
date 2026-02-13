@@ -5,8 +5,8 @@ Version: 2.0
 """
 from flask import Flask, render_template
 
-from frontend.modules.frontend.auth import login_required
-from frontend.modules.frontend.services.frontend_service import FrontendService
+from frontend.modules.auth import login_required
+from frontend.modules.services.frontend_service import FrontendService
 
 
 class DashboardModule:

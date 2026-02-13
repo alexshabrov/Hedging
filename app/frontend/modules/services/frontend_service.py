@@ -7,7 +7,7 @@ from typing import List
 
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
-from frontend.modules.frontend.models.frontend_models import (
+from frontend.modules.models.frontend_models import (
     FrontendActivePositionDoc,
     FrontendArchivePositionDoc,
     FrontendDashboardView,
@@ -22,8 +22,8 @@ from frontend.modules.frontend.models.frontend_models import (
     FrontendPositionRow,
     FrontendRunDetailsView,
 )
-from frontend.modules.frontend.services.backend_api_service import BackendApiService
-from frontend.modules.frontend.services.storage_service import StorageService
+from frontend.modules.services.backend_api_service import BackendApiService
+from frontend.modules.services.storage_service import StorageService
 
 
 class FrontendService:

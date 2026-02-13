@@ -11,7 +11,7 @@ import orjson
 
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendStartRunRequest
-from frontend.modules.frontend.models.frontend_models import (
+from frontend.modules.models.frontend_models import (
     FrontendBackendPositionsResponse,
     FrontendBackendStartRunResponse,
     FrontendBackendStopRunResponse,
