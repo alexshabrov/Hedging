@@ -2,6 +2,7 @@ from enum import Enum
 from typing import List, Optional
 
 from ..lib.strict_model import StrictModel
+from ..exchanges.exchange_models import Rule
 
 
 ### Enums ###
@@ -234,9 +235,11 @@ class HedgeSnapshot(StrictModel):
 
     base_price_units: int = 0
     lines: Optional[HedgeLines] = None
+    symbol_rule: Optional[Rule] = None
     
     opened_leg: Optional[HedgeLeg] = None
     opened_base_units: int = 0
+    close_reason: Optional[str] = None
 
     last_error: Optional[str] = None
     stats: HedgeStats
@@ -252,8 +255,10 @@ class HedgeSnapshot(StrictModel):
             'mutation_counter': int(self.mutation_counter),
             'base_price_units': int(self.base_price_units),
             'lines': self.lines.model_dump() if self.lines is not None else None,
+            'symbol_rule': self.symbol_rule.model_dump() if self.symbol_rule is not None else None,
             'opened_leg': self.opened_leg.value if self.opened_leg is not None else None,
             'opened_base_units': int(self.opened_base_units),
+            'close_reason': self.close_reason,
             'last_error': self.last_error,
             'stats': self.stats.model_dump(),
             'metrics': self.metrics.model_dump(),
@@ -329,6 +334,8 @@ class HedgeSnapshot(StrictModel):
             top_threshold_units=int(lines_raw['top_threshold_units']),
             btm_threshold_units=int(lines_raw['btm_threshold_units']),
         )
+        symbol_rule_raw = data.get('symbol_rule')
+        symbol_rule = None if symbol_rule_raw is None else Rule.from_dict(symbol_rule_raw)
 
         stats_raw = data['stats']
         if stats_raw is None:
@@ -345,8 +352,10 @@ class HedgeSnapshot(StrictModel):
             mutation_counter=int(data['mutation_counter']),
             base_price_units=int(data['base_price_units']),
             lines=lines,
+            symbol_rule=symbol_rule,
             opened_leg=None if data['opened_leg'] is None else HedgeLeg(str(data['opened_leg'])),
             opened_base_units=int(data['opened_base_units']),
+            close_reason=None if data.get('close_reason') is None else str(data.get('close_reason')),
             last_error=None if data['last_error'] is None else str(data['last_error']),
             stats=HedgeStats(
                 chases_started=int(stats_raw['chases_started']),
@@ -368,6 +377,7 @@ class _HedgeState(StrictModel):
 
     base_price_units: int = 0
     lines: Optional[HedgeLines] = None
+    symbol_rule: Optional[Rule] = None
 
     opened_leg: Optional[HedgeLeg] = None
     opened_base_units: int = 0

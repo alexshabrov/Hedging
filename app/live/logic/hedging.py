@@ -11,6 +11,7 @@ from ..exchanges.exchange_models import OrderSide, PositionSide
 from ..exchanges.exchange_models import ChaseCommand, PositionCommandType
 from ..exchanges.exchange_models import PositionEventType
 from ..exchanges.exchange_models import PositionEvent, ChaseResponse
+from ..exchanges.exchange_models import Rule
 from ..exchanges.position import Position
 
 from .helpers import pct_x10000_mul_price, mid_price_units
@@ -202,6 +203,29 @@ class HedgeEngine:
         self.state.current_chase = None
         self.state.neutral_excursion_threshold_units = 0
         self.state.neutral_excursion_max_units = 0
+
+        rules = self.exchange.get_rules()
+        if rules is None:
+            raise RuntimeError('HedgeEngine.start: exchange rules are None')
+        if not isinstance(rules, dict):
+            raise RuntimeError(f'HedgeEngine.start: exchange rules are not dict: {type(rules)}')
+        if self.config.symbol not in rules:
+            raise RuntimeError(f'HedgeEngine.start: rule not found for symbol: {self.config.symbol}')
+
+        rule = rules[self.config.symbol]
+        if rule is None:
+            raise RuntimeError(f'HedgeEngine.start: rule is None for symbol: {self.config.symbol}')
+        if not isinstance(rule, Rule):
+            raise RuntimeError(f'HedgeEngine.start: rule is not Rule for symbol={self.config.symbol}: {type(rule)}')
+
+        price_step = str(rule.price_step)
+        lot_step = str(rule.lot_step)
+        if len(price_step) == 0:
+            raise RuntimeError(f'HedgeEngine.start: empty price_step for symbol: {self.config.symbol}')
+        if len(lot_step) == 0:
+            raise RuntimeError(f'HedgeEngine.start: empty lot_step for symbol: {self.config.symbol}')
+
+        self.state.symbol_rule = rule
 
         # Position (chase executor)
         uid = f'hedge_{self.config.hedge_id}'
@@ -435,8 +459,10 @@ class HedgeEngine:
                 mutation_counter=int(st.mutation_counter),
                 base_price_units=int(st.base_price_units),
                 lines=st.lines,
+                symbol_rule=st.symbol_rule,
                 opened_leg=st.opened_leg,
                 opened_base_units=int(st.opened_base_units),
+                close_reason=st.closing_reason.value if st.closing_reason is not None else st.close_reason,
                 last_error=st.last_error,
                 stats=st.stats,
                 metrics=st.metrics,

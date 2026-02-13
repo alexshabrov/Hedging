@@ -148,6 +148,7 @@ class HedgerStats(StrictModel):
     calc: HedgeCalcStats
     uniswap: DexRunStats
     live: LiveStats
+    finished_at_ms: Optional[int]
     error: Optional[str]
 
     def model_dump(self) -> dict:  # type: ignore[override]
@@ -156,6 +157,7 @@ class HedgerStats(StrictModel):
             'calc': self.calc.model_dump(),
             'uniswap': self.uniswap.model_dump(),
             'live': self.live.model_dump(),
+            'finished_at_ms': None if self.finished_at_ms is None else int(self.finished_at_ms),
             'error': self.error,
         }
     
@@ -177,6 +179,7 @@ class HedgerStats(StrictModel):
             calc=calc,
             uniswap=uniswap,
             live=live,
+            finished_at_ms=None if data.get('finished_at_ms') is None else int(data.get('finished_at_ms')),
             error=None if data['error'] is None else str(data['error']),
         )
     

@@ -163,6 +163,7 @@ class Hedger:
         self._run_final_balance1_raw = 0
         self._run_mint_tx_timestamp_ms = 0
         self._run_decrease_tx_timestamp_ms = 0
+        self._run_finished_at_ms = 0
         
         self._run_calc_stats = None
         self._run_status = HedgeRunStatus.INITIALIZED
@@ -497,6 +498,8 @@ class Hedger:
             
             if len(cleanup_errors) > 0:
                 self._logger.error(f'hedger_cleanup_errors errors={cleanup_errors}')
+
+            self._run_finished_at_ms = int(time.time() * 1000)
             
             if self._run_calc_stats is not None:
                 uniswap_stats = DexRunStats(
@@ -527,6 +530,7 @@ class Hedger:
                     calc=self._run_calc_stats,
                     uniswap=uniswap_stats,
                     live=live_stats,
+                    finished_at_ms=int(self._run_finished_at_ms),
                     error=self._run_error,
                 )
                 
