@@ -1,0 +1,59 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Positions</div>
+                    <div class="card-body p-0">
+                        <table class="table table-bordered table-hover table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Run ID</th>
+                                    <th>Symbol</th>
+                                    <th>Status</th>
+                                    <th>Started (UTC)</th>
+                                    <th>Runtime (D:H:M)</th>
+                                    <th>Iterations</th>
+                                    <th>Total quote</th>
+                                    <th>PnL with hedge</th>
+                                    <th>PnL without hedge</th>
+                                    <th>APR with hedge %</th>
+                                    <th>APR without hedge %</th>
+                                    <th>Fees</th>
+                                    <th>Price PnL</th>
+                                    <th>Hedge PnL</th>
+                                    <th>Costs</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in rows %}
+                                    <tr>
+                                        <td><a href="/runs/{{ row.run_id }}">{{ row.run_id }}</a></td>
+                                        <td>{{ row.symbol }}</td>
+                                        <td>{{ row.status }}</td>
+                                        <td>{{ utc_ts(row.first_started_at_ms) }}</td>
+                                        <td>{{ row.runtime_dhm }}</td>
+                                        <td>{{ row.iterations_finished }}</td>
+                                        <td>{{ '%.4f'|format(row.total_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_with_hedge_quote) }} ({{ '%.2f'|format(row.pnl_with_hedge_pct) }}%)</td>
+                                        <td>{{ '%.4f'|format(row.pnl_without_hedge_quote) }} ({{ '%.2f'|format(row.pnl_without_hedge_pct) }}%)</td>
+                                        <td>{{ '%.3f'|format(row.apr_with_hedge_pct) }}</td>
+                                        <td>{{ '%.3f'|format(row.apr_without_hedge_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.fees_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.price_pnl_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.hedge_pnl_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.costs_quote) }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}

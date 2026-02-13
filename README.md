@@ -50,6 +50,24 @@ cd /hedging/app
 
 Данные монтируются в `/_data` (см. `docker-compose.yaml`).
 
+Для web-доступа добавлены `nginx` + `certbot`:
+
+- `nginx` слушает `80/443` и проксирует только frontend в `hedging:8081`.
+- `certbot` хранит сертификаты в `/_certbot/conf` и webroot challenge в `/_certbot/www`.
+
+Первичная выдача сертификата и включение HTTPS:
+
+```bash
+chmod +x add_domain.sh renew_all.sh
+./add_domain.sh hedging.example.com
+```
+
+Периодическое обновление сертификатов вручную:
+
+```bash
+./renew_all.sh
+```
+
 ### Вариант B: локальный Python
 
 Минимум: Python 3.10+ и `pip install -r requirements.txt`.
@@ -528,6 +546,33 @@ python app/backend/hedger_cli.py \
   --mongo-db hedging \
   --mongo-collection hedge_runs
 ```
+
+## 7.6 Backend internal service (`app/backend/backend_service.py`)
+
+```bash
+export BINANCE_KEY="..."
+export BINANCE_SECRET="..."
+export PRIVATE_KEY="..."
+export WALLET_ADDRESS="0x..."  # optional
+
+python app/backend/backend_service.py
+```
+
+По умолчанию сервис слушает `0.0.0.0:8080`.
+
+## 7.7 Frontend admin service (`app/frontend/app.py`)
+
+```bash
+export FRONT_SECRET_KEY="..."
+export FRONT_ADMIN_PASSWORD="..."
+export FRONT_BACKEND_URL="http://hedging:8080"
+export FRONT_MONGO_URI="mongodb://hedging_mongo:27017"
+export FRONT_MONGO_DB="hedging"
+
+python app/frontend/app.py
+```
+
+По умолчанию сервис слушает `0.0.0.0:8081`.
 
 ---
 

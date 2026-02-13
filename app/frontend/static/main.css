@@ -1,0 +1,8 @@
+.json-block {
+    max-height: 420px;
+    overflow: auto;
+    background: #f6f8fa;
+    padding: 10px;
+    border: 1px solid #dfe2e5;
+    border-radius: 4px;
+}

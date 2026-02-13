@@ -18,6 +18,29 @@ services:
       - nginx-common
     command: mongod # --replSet rs0 --bind_ip_all
 
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/site.conf:/etc/nginx/conf.d/default.conf:ro
+      - /_certbot/conf:/etc/letsencrypt
+      - /_certbot/www:/var/www/certbot
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      - hedging
+    networks:
+      - nginx-common
+
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - /_certbot/conf:/etc/letsencrypt
+      - /_certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - nginx-common
+
 networks:
   nginx-common:
     external: true

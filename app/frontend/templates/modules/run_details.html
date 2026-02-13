@@ -1,0 +1,93 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-info">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Run {{ details.position.run_id }}</div>
+                    <div class="card-body">
+                        <form method="POST" action="/runs/{{ details.position.run_id }}/stop">
+                            <button type="submit" class="btn btn-danger btn-sm">Stop run</button>
+                            <a href="/positions" class="btn btn-secondary btn-sm">Back to positions</a>
+                        </form>
+
+                        <hr>
+
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Status</th><td>{{ details.position.status }}</td></tr>
+                                <tr><th>Symbol</th><td>{{ details.position.symbol }}</td></tr>
+                                <tr><th>Started (UTC)</th><td>{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
+                                <tr><th>Runtime</th><td>{{ details.position.runtime_dhm }}</td></tr>
+                                <tr><th>Total quote</th><td>{{ '%.4f'|format(details.position.total_quote) }}</td></tr>
+                                <tr><th>PnL with hedge</th><td>{{ '%.4f'|format(details.position.pnl_with_hedge_quote) }}</td></tr>
+                                <tr><th>PnL without hedge</th><td>{{ '%.4f'|format(details.position.pnl_without_hedge_quote) }}</td></tr>
+                                <tr><th>APR with hedge %</th><td>{{ '%.4f'|format(details.position.apr_with_hedge_pct) }}</td></tr>
+                                <tr><th>APR without hedge %</th><td>{{ '%.4f'|format(details.position.apr_without_hedge_pct) }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Iterations</div>
+                    <div class="card-body p-0">
+                        <table class="table table-bordered table-hover table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>ID</th>
+                                    <th>Status</th>
+                                    <th>Start</th>
+                                    <th>Finish</th>
+                                    <th>Runtime sec</th>
+                                    <th>Close reason</th>
+                                    <th>PnL with hedge</th>
+                                    <th>PnL without hedge</th>
+                                    <th>APR with hedge %</th>
+                                    <th>APR without hedge %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in details.iterations %}
+                                    <tr>
+                                        <td>{{ row.iteration_no }}</td>
+                                        <td><a href="/iterations/{{ row.id }}">{{ row.id }}</a></td>
+                                        <td>{{ row.status }}</td>
+                                        <td>{{ utc_ts(row.started_at_ms) }}</td>
+                                        <td>{{ utc_ts(row.finished_at_ms) }}</td>
+                                        <td>{{ '%.2f'|format(row.runtime_sec) }}</td>
+                                        <td>{{ row.close_reason }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_with_hedge_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_without_hedge_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_with_hedge_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_without_hedge_pct) }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}

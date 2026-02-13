@@ -1,0 +1,46 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Iteration {{ details.row.iteration_no }}</div>
+                    <div class="card-body">
+                        <a href="/runs/{{ details.row.run_id }}" class="btn btn-secondary btn-sm">Back to run</a>
+                        <hr>
+
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>ID</th><td>{{ details.row.id }}</td></tr>
+                                <tr><th>Run ID</th><td>{{ details.row.run_id }}</td></tr>
+                                <tr><th>Status</th><td>{{ details.row.status }}</td></tr>
+                                <tr><th>Close reason</th><td>{{ details.row.close_reason }}</td></tr>
+                                <tr><th>Started</th><td>{{ utc_ts(details.row.started_at_ms) }}</td></tr>
+                                <tr><th>Finished</th><td>{{ utc_ts(details.row.finished_at_ms) }}</td></tr>
+                                <tr><th>Runtime sec</th><td>{{ '%.4f'|format(details.row.runtime_sec) }}</td></tr>
+                                <tr><th>Total quote</th><td>{{ '%.6f'|format(details.row.total_quote) }}</td></tr>
+                                <tr><th>PnL with hedge</th><td>{{ '%.6f'|format(details.row.pnl_with_hedge_quote) }}</td></tr>
+                                <tr><th>PnL without hedge</th><td>{{ '%.6f'|format(details.row.pnl_without_hedge_quote) }}</td></tr>
+                                <tr><th>APR with hedge (%)</th><td>{{ '%.6f'|format(details.row.apr_with_hedge_pct) }}</td></tr>
+                                <tr><th>APR without hedge (%)</th><td>{{ '%.6f'|format(details.row.apr_without_hedge_pct) }}</td></tr>
+                                <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.row.fees_quote) }}</td></tr>
+                                <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.row.price_pnl_quote) }}</td></tr>
+                                <tr><th>Hedge PnL quote</th><td>{{ '%.6f'|format(details.row.hedge_pnl_quote) }}</td></tr>
+                                <tr><th>Costs quote</th><td>{{ '%.6f'|format(details.row.costs_quote) }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5>Raw stats</h5>
+                        <pre class="json-block">{{ details.stats | tojson(indent=2) }}</pre>
+
+                        <h5>Raw pnl</h5>
+                        <pre class="json-block">{{ details.pnl | tojson(indent=2) }}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}
