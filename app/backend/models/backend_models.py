@@ -103,6 +103,7 @@ class BackendRunAggregates(StrictModel):
 
 
 class BackendIterationRecord(StrictModel):
+    id: str
     run_id: str
     iteration_no: int
     started_at_ms: int
@@ -118,6 +119,7 @@ class BackendIterationRecord(StrictModel):
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
+            'id': self.id,
             'run_id': self.run_id,
             'iteration_no': int(self.iteration_no),
             'started_at_ms': int(self.started_at_ms),

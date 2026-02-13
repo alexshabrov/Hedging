@@ -1,7 +1,7 @@
 """
 Backend service module
 Date: 2026-02-13
-Version: 1.0
+Version: 1.1
 """
 import os, sys, time, threading, uuid
 from typing import Dict, List, Optional, Tuple
@@ -22,6 +22,12 @@ from models.backend_models import (
 )
 from modules.hedger_class import Hedger
 from modules.hedger_helper import calc_hedger_pnl_stats
+
+
+### Collections ###
+ACTIVE_POSITIONS_COLLECTION = 'backend_positions_active'
+ARCHIVE_POSITIONS_COLLECTION = 'backend_positions_archive'
+HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
 
 
 ### Run context ###
@@ -132,6 +138,24 @@ class Backend:
                 _t, exc, _tb = sys.exc_info()
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
+        @self._app.route('/api/positions/active', methods=['GET'])
+        def api_positions_active() -> Response:
+            try:
+                docs = self.list_positions_active_docs()
+                return self._json_response({'ok': True, 'items': docs}, 200)
+            except Exception:
+                _t, exc, _tb = sys.exc_info()
+                return self._json_response({'ok': False, 'error': str(exc)}, 400)
+
+        @self._app.route('/api/positions/archive', methods=['GET'])
+        def api_positions_archive() -> Response:
+            try:
+                docs = self.list_positions_archive_docs()
+                return self._json_response({'ok': True, 'items': docs}, 200)
+            except Exception:
+                _t, exc, _tb = sys.exc_info()
+                return self._json_response({'ok': False, 'error': str(exc)}, 400)
+
         @self._app.route('/api/runs/<run_id>', methods=['GET'])
         def api_run_details(run_id: str) -> Response:
             try:
@@ -215,15 +239,13 @@ class Backend:
                 hedger_to_stop.stop()
             except Exception:
                 _t, exc, _tb = sys.exc_info()
-
                 with ctx.lock:
                     ctx.last_error = f'stop_run hedger.stop failed: {exc}'
                     ctx.updated_at_ms = int(time.time() * 1000)
-
-                self._write_run_doc(ctx)
+                self._write_position_active_doc(ctx)
                 raise RuntimeError(f'Backend.stop_run: hedger.stop failed: {exc}')
 
-        self._write_run_doc(ctx)
+        self._write_position_active_doc(ctx)
         self._logger.info(f'backend_run_stop_requested run_id={run_id}')
 
     def list_positions(self) -> List[BackendPositionView]:
@@ -239,6 +261,31 @@ class Backend:
 
         rows.sort(key=lambda x: int(x.first_started_at_ms), reverse=True)
         return rows
+
+    def list_positions_active_docs(self) -> List[dict]:
+        docs = []
+        with self._lock:
+            for _run_id, ctx in self._runs.items():
+                docs.append(self._build_position_active_doc(ctx))
+
+        docs.sort(key=lambda x: int(x['started_at_ms']), reverse=True)
+        return docs
+
+    def list_positions_archive_docs(self) -> List[dict]:
+        out = []
+
+        with self._lock:
+            contexts = []
+            for _run_id, ctx in self._runs.items():
+                contexts.append(ctx)
+
+        for ctx in contexts:
+            with ctx.lock:
+                if ctx.lifecycle == BackendRunLifecycle.FINISHED or ctx.lifecycle == BackendRunLifecycle.FAILED:
+                    out.append(self._build_position_archive_doc(ctx))
+
+        out.sort(key=lambda x: int(x['finished_at_ms']), reverse=True)
+        return out
 
     def get_run_details(self, run_id: str) -> BackendRunDetailsView:
         if not isinstance(run_id, str) or len(run_id) == 0:
@@ -293,12 +340,8 @@ class Backend:
 
             market_price = None
             if ctx.current_hedger is not None:
-                try:
-                    if ctx.current_hedger._cw is not None:
-                        market_price = float(ctx.current_hedger._cw.get_current_traditional_price())
-                except Exception:
-                    _t, exc, _tb = sys.exc_info()
-                    ctx.last_error = f'market_price failed: {exc}'
+                if ctx.current_hedger._cw is not None:
+                    market_price = float(ctx.current_hedger._cw.get_current_traditional_price())
 
             return BackendPositionView(
                 run_id=str(ctx.run_id),
@@ -350,7 +393,7 @@ class Backend:
             ctx.started_at_ms = int(time.time() * 1000)
             ctx.updated_at_ms = int(ctx.started_at_ms)
 
-        self._write_run_doc(ctx)
+        self._write_position_active_doc(ctx)
         self._logger.info(f'backend_run_loop_enter run_id={ctx.run_id}')
 
         try:
@@ -381,7 +424,7 @@ class Backend:
             self._logger.info(f'backend_run_finished run_id={ctx.run_id}')
 
         finally:
-            self._write_run_doc(ctx)
+            self._archive_position_doc(ctx)
 
     def _run_single_iteration(self, ctx: BackendRunContext) -> None:
         started_at_ms = int(time.time() * 1000)
@@ -407,40 +450,56 @@ class Backend:
 
         try:
             stats = hedger.run()
-            pnl = calc_hedger_pnl_stats(stats)
         except BaseException:
             run_exc = sys.exc_info()
 
-        finally:
-            stop_exc = None
+        report_exc = None
+        if run_exc is None:
             try:
-                hedger.stop()
+                if stats is None:
+                    raise RuntimeError('Backend._run_single_iteration: stats is None')
+                if not isinstance(stats, HedgerStats):
+                    raise RuntimeError(f'Backend._run_single_iteration: stats is not HedgerStats: {type(stats)}')
+                pnl = calc_hedger_pnl_stats(stats)
             except BaseException:
-                stop_exc = sys.exc_info()
+                report_exc = sys.exc_info()
 
-            with ctx.lock:
-                ctx.current_hedger = None
-                ctx.updated_at_ms = int(time.time() * 1000)
+        stop_exc = None
+        try:
+            hedger.stop()
+        except BaseException:
+            stop_exc = sys.exc_info()
 
-            if run_exc is not None and stop_exc is not None:
-                _t_run, exc_run, _tb_run = run_exc
-                _t_stop, exc_stop, _tb_stop = stop_exc
-                raise RuntimeError(f'Backend._run_single_iteration: run failed ({exc_run}) and stop failed ({exc_stop})') from exc_run
+        with ctx.lock:
+            ctx.current_hedger = None
+            ctx.updated_at_ms = int(time.time() * 1000)
 
-            if stop_exc is not None:
-                _t_stop, exc_stop, tb_stop = stop_exc
-                raise exc_stop.with_traceback(tb_stop)
+        if run_exc is not None and stop_exc is not None:
+            _t_run, exc_run, _tb_run = run_exc
+            _t_stop, exc_stop, _tb_stop = stop_exc
+            raise RuntimeError(f'Backend._run_single_iteration: run failed ({exc_run}) and stop failed ({exc_stop})') from exc_run
+
+        if report_exc is not None and stop_exc is not None:
+            _t_report, exc_report, _tb_report = report_exc
+            _t_stop, exc_stop, _tb_stop = stop_exc
+            raise RuntimeError(f'Backend._run_single_iteration: report failed ({exc_report}) and stop failed ({exc_stop})') from exc_report
+
+        if stop_exc is not None:
+            _t_stop, exc_stop, tb_stop = stop_exc
+            raise exc_stop.with_traceback(tb_stop)
 
         if run_exc is not None:
             _t_run, exc_run, tb_run = run_exc
             raise exc_run.with_traceback(tb_run)
 
+        if report_exc is not None:
+            _t_report, exc_report, tb_report = report_exc
+            raise exc_report.with_traceback(tb_report)
+
         if stats is None:
-            raise RuntimeError('Backend._run_single_iteration: stats is None')
-        if not isinstance(stats, HedgerStats):
-            raise RuntimeError(f'Backend._run_single_iteration: stats is not HedgerStats: {type(stats)}')
+            raise RuntimeError('Backend._run_single_iteration: stats is None after run/report')
         if pnl is None:
-            raise RuntimeError('Backend._run_single_iteration: pnl is None')
+            raise RuntimeError('Backend._run_single_iteration: pnl is None after report')
 
         finished_at_ms = int(time.time() * 1000)
         swap_cost_quote = self._calc_swap_cost_quote(stats)
@@ -449,6 +508,7 @@ class Backend:
         pnl_with_hedge_quote = float(pnl_without_hedge_quote) + float(pnl.cex_pnl_quote)
 
         row = BackendIterationRecord(
+            id=str(uuid.uuid4().hex),
             run_id=str(ctx.run_id),
             iteration_no=int(iteration_no),
             started_at_ms=int(started_at_ms),
@@ -468,9 +528,9 @@ class Backend:
             self._accumulate_iteration(ctx, row)
             ctx.updated_at_ms = int(time.time() * 1000)
 
-        self._write_iteration_doc(ctx, row)
-        self._write_run_doc(ctx)
-        self._logger.info(f'backend_iteration_done run_id={ctx.run_id} iteration_no={iteration_no}')
+        self._write_hedger_run_doc(ctx, row)
+        self._write_position_active_doc(ctx)
+        self._logger.info(f'backend_iteration_done run_id={ctx.run_id} iteration_no={iteration_no} hedger_run_id={row.id}')
 
     def _accumulate_iteration(self, ctx: BackendRunContext, row: BackendIterationRecord) -> None:
         if row is None:
@@ -505,38 +565,17 @@ class Backend:
 
         return float(order.fee_amount)
 
-    def _write_iteration_doc(self, ctx: BackendRunContext, row: BackendIterationRecord) -> None:
-        uri = str(ctx.config.mongo_uri)
-        db_name = str(ctx.config.mongo_db)
-        collection_name = 'backend_iterations'
-
-        client = MongoClient(str(uri), serverSelectionTimeoutMS=5000)
-        try:
-            _ = client.server_info()
-            db = client[str(db_name)]
-            col = db[str(collection_name)]
-
-            doc = row.model_dump()
-            doc['created_at_ms'] = int(time.time() * 1000)
-
-            res = col.insert_one(doc)
-            if res is None or res.inserted_id is None:
-                raise RuntimeError('Backend._write_iteration_doc: insert failed')
-        finally:
-            client.close()
-
-    def _write_run_doc(self, ctx: BackendRunContext) -> None:
+    def _build_position_active_doc(self, ctx: BackendRunContext) -> dict:
         position = self._build_position_view(ctx)
 
         with ctx.lock:
-            doc = {
+            return {
                 'run_id': str(ctx.run_id),
+                'status': str(ctx.lifecycle.value),
                 'created_at_ms': int(ctx.created_at_ms),
                 'started_at_ms': int(ctx.started_at_ms),
                 'updated_at_ms': int(ctx.updated_at_ms),
-                'finished_at_ms': int(ctx.finished_at_ms),
                 'stop_requested': bool(ctx.stop_requested),
-                'status': str(ctx.lifecycle.value),
                 'last_error': None if ctx.last_error is None else str(ctx.last_error),
                 'config': ctx.config.model_dump(),
                 'aggregates': ctx.aggregates.model_dump(),
@@ -544,18 +583,84 @@ class Backend:
                 'iterations_count': int(len(ctx.iterations)),
             }
 
+    def _build_position_archive_doc(self, ctx: BackendRunContext) -> dict:
+        position = self._build_position_view(ctx)
+
+        with ctx.lock:
+            return {
+                'run_id': str(ctx.run_id),
+                'status': str(ctx.lifecycle.value),
+                'created_at_ms': int(ctx.created_at_ms),
+                'started_at_ms': int(ctx.started_at_ms),
+                'finished_at_ms': int(ctx.finished_at_ms),
+                'archived_at_ms': int(time.time() * 1000),
+                'stop_requested': bool(ctx.stop_requested),
+                'last_error': None if ctx.last_error is None else str(ctx.last_error),
+                'config': ctx.config.model_dump(),
+                'aggregates': ctx.aggregates.model_dump(),
+                'position': position.model_dump(),
+                'iterations_count': int(len(ctx.iterations)),
+            }
+
+    def _write_position_active_doc(self, ctx: BackendRunContext) -> None:
+        doc = self._build_position_active_doc(ctx)
+
         uri = str(ctx.config.mongo_uri)
         db_name = str(ctx.config.mongo_db)
-        collection_name = 'backend_runs'
 
         client = MongoClient(str(uri), serverSelectionTimeoutMS=5000)
         try:
             _ = client.server_info()
             db = client[str(db_name)]
-            col = db[str(collection_name)]
-
+            col = db[str(ACTIVE_POSITIONS_COLLECTION)]
             res = col.replace_one({'run_id': str(ctx.run_id)}, doc, upsert=True)
             if res is None:
-                raise RuntimeError('Backend._write_run_doc: replace_one returned None')
+                raise RuntimeError('Backend._write_position_active_doc: replace_one returned None')
+        finally:
+            client.close()
+
+    def _archive_position_doc(self, ctx: BackendRunContext) -> None:
+        archive_doc = self._build_position_archive_doc(ctx)
+
+        uri = str(ctx.config.mongo_uri)
+        db_name = str(ctx.config.mongo_db)
+
+        client = MongoClient(str(uri), serverSelectionTimeoutMS=5000)
+        try:
+            _ = client.server_info()
+            db = client[str(db_name)]
+            col_active = db[str(ACTIVE_POSITIONS_COLLECTION)]
+            col_archive = db[str(ARCHIVE_POSITIONS_COLLECTION)]
+
+            res_archive = col_archive.replace_one({'run_id': str(ctx.run_id)}, archive_doc, upsert=True)
+            if res_archive is None:
+                raise RuntimeError('Backend._archive_position_doc: archive replace_one returned None')
+
+            res_delete = col_active.delete_one({'run_id': str(ctx.run_id)})
+            if res_delete is None:
+                raise RuntimeError('Backend._archive_position_doc: delete_one returned None')
+        finally:
+            client.close()
+
+    def _write_hedger_run_doc(self, ctx: BackendRunContext, row: BackendIterationRecord) -> None:
+        if row is None:
+            raise RuntimeError('Backend._write_hedger_run_doc: row is None')
+
+        uri = str(ctx.config.mongo_uri)
+        db_name = str(ctx.config.mongo_db)
+
+        client = MongoClient(str(uri), serverSelectionTimeoutMS=5000)
+        try:
+            _ = client.server_info()
+            db = client[str(db_name)]
+            col = db[str(HEDGER_RUNS_COLLECTION)]
+
+            doc = row.model_dump()
+            doc['created_at_ms'] = int(time.time() * 1000)
+            doc['run_lifecycle'] = str(ctx.lifecycle.value)
+
+            res = col.insert_one(doc)
+            if res is None or res.inserted_id is None:
+                raise RuntimeError('Backend._write_hedger_run_doc: insert failed')
         finally:
             client.close()
