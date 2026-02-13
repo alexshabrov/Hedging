@@ -6,13 +6,13 @@ Version: 3.0
 from typing import List, Optional
 
 from live.lib.strict_model import StrictModel
-from models.backend_models import (
+from backend.models.backend_models import (
     BackendPositionView,
     BackendRunAggregates,
     BackendRunLifecycle,
     BackendStartRunRequest,
 )
-from models.hedger_models import CexTriggerMode, HedgerConfig
+from backend.models.hedger_models import CexTriggerMode, HedgerConfig
 
 
 def frontend_position_view_from_dict(data: dict) -> BackendPositionView:

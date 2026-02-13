@@ -1,3 +1,3 @@
 """
-Frontend modules package
+Frontend package
 """

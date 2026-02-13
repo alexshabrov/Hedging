@@ -10,8 +10,8 @@ from typing import List, Optional
 import orjson
 
 from live.lib.logger import get_logger
-from models.backend_models import BackendPositionView, BackendStartRunRequest
-from modules.frontend.models.frontend_models import (
+from backend.models.backend_models import BackendPositionView, BackendStartRunRequest
+from frontend.modules.frontend.models.frontend_models import (
     FrontendBackendPositionsResponse,
     FrontendBackendStartRunResponse,
     FrontendBackendStopRunResponse,

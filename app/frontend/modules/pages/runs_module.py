@@ -8,10 +8,10 @@ from typing import Optional
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 
-from models.hedger_models import CexTriggerMode
-from modules.frontend.auth import login_required
-from modules.frontend.models.frontend_models import FrontendStartRunForm
-from modules.frontend.services.frontend_service import FrontendService
+from backend.models.hedger_models import CexTriggerMode
+from frontend.modules.frontend.auth import login_required
+from frontend.modules.frontend.models.frontend_models import FrontendStartRunForm
+from frontend.modules.frontend.services.frontend_service import FrontendService
 
 
 class RunsModule:

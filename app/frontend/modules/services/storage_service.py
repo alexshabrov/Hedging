@@ -8,7 +8,7 @@ from typing import List, Optional
 from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
-from modules.frontend.models.frontend_models import (
+from frontend.modules.frontend.models.frontend_models import (
     FrontendActivePositionDoc,
     FrontendArchivePositionDoc,
     FrontendIterationDoc,

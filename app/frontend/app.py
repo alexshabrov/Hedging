@@ -7,8 +7,8 @@ import os
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from modules.frontend.auth import FRONTEND_AUTH_SESSION_KEY
-from modules.frontend.frontend_module import Frontend
+from frontend.modules.frontend.auth import FRONTEND_AUTH_SESSION_KEY
+from frontend.modules.frontend.frontend_module import Frontend
 
 
 ### Env ###
