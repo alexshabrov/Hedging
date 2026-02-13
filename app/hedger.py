@@ -106,6 +106,7 @@ def main():
     try:
         n_iter = 0
         while True:
+            n_iter += 1
             run_exc = None
             stats = None
             
@@ -123,7 +124,7 @@ def main():
                 
                 pnl = calc_hedger_pnl_stats(report_stats)
                 
-                print(f'Hedger PnL report for iteration {n_iter+1}:')
+                print(f'Hedger PnL report for iteration {n_iter}:')
                 print(f'  CEX PnL: {float(pnl.cex_pnl_quote):.8f}')
                 print(f'  DEX PnL (realized IL): {float(pnl.dex_realized_il_quote):.8f}')
                 print(f'  Fees received: {float(pnl.fees_received_quote):.8f}')
