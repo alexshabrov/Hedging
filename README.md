@@ -11,7 +11,7 @@
 - оффлайн-исследований и бэктестов логики лимитного исполнения/чейза на исторических трейдах Binance UM Futures;
 - live-исполнения и хеджирования на Binance (`live` пакет);
 - работы с DEX (Uniswap V3 + CowSwap) в реальном времени (`dex` пакет);
-- объединения CEX+DEX в единый раннер `app/hedger.py`, который:
+- объединения CEX+DEX в единый раннер `app/backend/hedger_cli.py`, который:
   - открывает LP-позицию в Uniswap V3,
   - ведет хедж через live-движок на Binance,
   - закрывает ликвидность,
@@ -29,7 +29,7 @@
 - `app/dex` — runtime для DEX: realtime swap events, работа с Uniswap V3 контрактами, CowSwap свопы;
 - `app/modules/hedger_class.py` — оркестратор полного цикла CEX+DEX;
 - `app/models/hedger_models.py` — итоговые модели статистики раннера;
-- `app/hedger.py` — CLI-энтрипойнт полного хедж-сценария;
+- `app/backend/hedger_cli.py` — CLI-энтрипойнт полного хедж-сценария;
 - `app/uniswapv3.ipynb` — исследовательский ноутбук по Uniswap V3.
 
 ---
@@ -195,7 +195,7 @@ python -m pip install -e app/dex
 
 ---
 
-## `app/hedger.py`
+## `app/backend/hedger_cli.py`
 
 CLI точка входа full-run.
 
@@ -375,7 +375,7 @@ CLI точка входа full-run.
 
 ## 5.6 Итоговая модель full-run (`HedgerStats`)
 
-Выход `app/hedger.py`:
+Выход `app/backend/hedger_cli.py`:
 
 ```json
 {
@@ -506,7 +506,7 @@ python -m dex.examples.liquidity_example \
   --fee-pct=0.05
 ```
 
-## 7.5 Full CEX+DEX runner (`hedger.py`)
+## 7.5 Full CEX+DEX runner (`backend/hedger_cli.py`)
 
 ```bash
 export BINANCE_KEY="..."
@@ -514,7 +514,7 @@ export BINANCE_SECRET="..."
 export PRIVATE_KEY="..."
 export WALLET_ADDRESS="0x..."
 
-python app/hedger.py \
+python app/backend/hedger_cli.py \
   --symbol SOLUSDC \
   --rpc-url https://arbitrum-mainnet.infura.io/v3/<KEY> \
   --network arbitrum \
