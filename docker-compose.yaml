@@ -32,6 +32,8 @@ services:
     image: mongo
     volumes:
       - /_db/hedging_mongo:/data/db
+    logging:
+      driver: "none"
     networks:
       - nginx-common
     command: mongod # --replSet rs0 --bind_ip_all
