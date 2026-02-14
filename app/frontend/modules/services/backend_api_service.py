@@ -65,6 +65,22 @@ class BackendApiService:
             raise RuntimeError(f'BackendApiService.list_runtime_positions: backend error: {parsed.error}')
         return parsed.items
 
+    def get_run_details(self, run_id: str) -> dict:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('BackendApiService.get_run_details: run_id is empty')
+
+        res = self._request_json('GET', f'/api/runs/{run_id}', None)
+        if 'ok' not in res:
+            raise RuntimeError('BackendApiService.get_run_details: missing ok in response')
+        if not bool(res['ok']):
+            err = None if 'error' not in res else res['error']
+            raise RuntimeError(f'BackendApiService.get_run_details: backend error: {err}')
+        if 'item' not in res:
+            raise RuntimeError('BackendApiService.get_run_details: missing item in response')
+        if not isinstance(res['item'], dict):
+            raise RuntimeError(f'BackendApiService.get_run_details: item is not dict: {type(res["item"])}')
+        return res['item']
+
     def _request_json(self, method: str, path: str, payload: Optional[dict]):
         if not isinstance(method, str) or len(method) == 0:
             raise RuntimeError('BackendApiService._request_json: method is empty')

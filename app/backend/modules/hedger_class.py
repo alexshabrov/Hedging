@@ -66,6 +66,7 @@ class Hedger:
         self._rule = None
         
         self.last_stats = None
+        self._is_running = False
         
         self._validate_config()
         self._init_clients()
@@ -169,6 +170,14 @@ class Hedger:
         self._run_status = HedgeRunStatus.INITIALIZED
         self._run_error = None
         self._run_main_exc = None
+
+    def _is_benign_stop_error(self, e: Exception) -> bool:
+        msg = str(e).lower()
+        if 'not started' in msg:
+            return True
+        if 'already closed' in msg:
+            return True
+        return False
     
     def stop(self) -> None:
         cleanup_errors = []
@@ -178,27 +187,31 @@ class Hedger:
                 self._logger.info('hedger_rt_stop')
                 self._rt.stop()
             except Exception as e:
-                cleanup_errors.append(e)
+                if not self._is_benign_stop_error(e):
+                    cleanup_errors.append(e)
         
         if self._exchange is not None:
             try:
                 self._logger.info('hedger_exchange_stop')
                 self._exchange.stop()
             except Exception as e:
-                cleanup_errors.append(e)
+                if not self._is_benign_stop_error(e):
+                    cleanup_errors.append(e)
         
         self._rt = None
         self._exchange = None
-        self._cw = None
-        self._rule = None
+        if not bool(self._is_running):
+            self._cw = None
+            self._rule = None
         
-        if len(cleanup_errors) > 0:
+        if len(cleanup_errors) > 0 and (not bool(self._is_running)):
             if len(cleanup_errors) == 1:
                 raise cleanup_errors[0]
             raise RuntimeError(f'Hedger.stop failed: cleanup_errors={cleanup_errors}')
     
     def run(self) -> HedgerStats:
         self._reset_run_state()
+        self._is_running = True
         
         if self._exchange is None:
             raise RuntimeError('Hedger: exchange is not initialized')
@@ -493,7 +506,8 @@ class Hedger:
                         self._logger.info('hedger_hedge_stop')
                         self._run_hedge.stop()
                 except Exception as e:
-                    _add_cleanup_error(e)
+                    if not self._is_benign_stop_error(e):
+                        _add_cleanup_error(e)
             
             dex_cleanup_thread = threading.Thread(target=_cleanup_dex, name='hedger_dex_cleanup')
             live_cleanup_thread = threading.Thread(target=_cleanup_live, name='hedger_live_cleanup')
@@ -549,6 +563,8 @@ class Hedger:
                     self._write_stats(self.last_stats)
                 except Exception as e:
                     cleanup_errors.append(e)
+
+            self._is_running = False
             
             if self._run_main_exc is not None and len(cleanup_errors) > 0:
                 _t, exc, _tb = self._run_main_exc

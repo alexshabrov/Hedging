@@ -41,11 +41,11 @@
                                 </div>
                                 <div class="form-group col-md-2">
                                     <label>fee_pct</label>
-                                    <input class="form-control" name="fee_pct" value="0.05" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="fee_pct" value="0.05" required>
                                 </div>
                                 <div class="form-group col-md-2">
                                     <label>cex_ratio</label>
-                                    <input class="form-control" name="cex_ratio" value="0.255" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="cex_ratio" value="0.255" required>
                                 </div>
                             </div>
 
@@ -59,11 +59,11 @@
                                 </div>
                                 <div class="form-group col-md-4">
                                     <label>trigger_pct</label>
-                                    <input class="form-control" name="trigger_pct" value="0.05" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="trigger_pct" value="0.05" required>
                                 </div>
                                 <div class="form-group col-md-4">
                                     <label>trigger_units</label>
-                                    <input class="form-control" name="trigger_units" value="0" required>
+                                    <input type="number" step="1" min="0" class="form-control" name="trigger_units" value="0" required>
                                 </div>
                             </div>
 
@@ -96,15 +96,15 @@
                             <div class="form-row">
                                 <div class="form-group col-md-4">
                                     <label>total_quote</label>
-                                    <input class="form-control" name="total_quote" value="1000" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="total_quote" value="1000" required>
                                 </div>
                                 <div class="form-group col-md-4">
                                     <label>price_lower_pct</label>
-                                    <input class="form-control" name="price_lower_pct" value="5" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="price_lower_pct" value="5" required>
                                 </div>
                                 <div class="form-group col-md-4">
                                     <label>price_upper_pct</label>
-                                    <input class="form-control" name="price_upper_pct" value="5" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="price_upper_pct" value="5" required>
                                 </div>
                             </div>
 
@@ -145,11 +145,11 @@
                                 </div>
                                 <div class="form-group col-md-1">
                                     <label>fee_pct</label>
-                                    <input class="form-control" name="fee_pct" value="{{ edit_template.fee_pct }}" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="fee_pct" value="{{ edit_template.fee_pct }}" required>
                                 </div>
                                 <div class="form-group col-md-1">
                                     <label>cex_ratio</label>
-                                    <input class="form-control" name="cex_ratio" value="{{ edit_template.cex_ratio }}" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="cex_ratio" value="{{ edit_template.cex_ratio }}" required>
                                 </div>
                             </div>
 
@@ -163,11 +163,11 @@
                                 </div>
                                 <div class="form-group col-md-4">
                                     <label>trigger_pct</label>
-                                    <input class="form-control" name="trigger_pct" value="{{ edit_template.trigger_pct }}" required>
+                                    <input type="number" step="any" min="0" class="form-control" name="trigger_pct" value="{{ edit_template.trigger_pct }}" required>
                                 </div>
                                 <div class="form-group col-md-4">
                                     <label>trigger_units</label>
-                                    <input class="form-control" name="trigger_units" value="{{ edit_template.trigger_units }}" required>
+                                    <input type="number" step="1" min="0" class="form-control" name="trigger_units" value="{{ edit_template.trigger_units }}" required>
                                 </div>
                             </div>
 

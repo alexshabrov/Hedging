@@ -28,6 +28,7 @@ from frontend.modules.models.frontend_models import (
     FrontendPositionRow,
     FrontendRunTemplateDoc,
     FrontendRunDetailsView,
+    frontend_position_view_from_dict,
     frontend_dex_network_configs_from_params,
 )
 from frontend.modules.services.backend_api_service import BackendApiService
@@ -161,6 +162,7 @@ class FrontendService:
         rpc_url = self._build_rpc_url_for_network(str(template.network))
 
         req = BackendStartRunRequest(
+            template_id=str(form.template_id),
             config=HedgerConfig(
                 symbol=str(template.symbol),
                 rpc_url=str(rpc_url),
@@ -228,20 +230,48 @@ class FrontendService:
         active_doc = self._storage.find_position(run_id)
         archive_doc = self._storage.find_position_archive(run_id)
 
-        position_row = None
-        if active_doc is not None:
-            position_row = self._build_position_row_from_active(active_doc)
-        elif archive_doc is not None:
-            position_row = self._build_position_row_from_archive(archive_doc)
-        else:
-            raise RuntimeError(f'FrontendService.get_run_details: run not found: {run_id}')
-
         iteration_docs = self._storage.list_iterations_by_run(run_id)
         iteration_rows = []
         for item in iteration_docs:
             iteration_rows.append(self._build_iteration_row(item))
 
+        live_details = None
+        try:
+            live_details = self._backend_api.get_run_details(run_id)
+        except Exception as exc:
+            self._logger.warning(f'FrontendService.get_run_details: live backend unavailable run_id={run_id} error={exc}')
+
+        position_row = None
+        config = None
+        template_id = None
+        if live_details is not None:
+            live_position = frontend_position_view_from_dict(live_details['position'])
+            is_active = live_position.status in [
+                BackendRunLifecycle.INITIALIZED,
+                BackendRunLifecycle.RUNNING,
+                BackendRunLifecycle.STOPPING,
+            ]
+            position_row = self._build_position_row_common(
+                position=live_position,
+                iterations_count=len(iteration_rows),
+                is_active=bool(is_active),
+            )
+            config = HedgerConfig.from_dict(live_details['config'])
+            template_id = None if live_details['template_id'] is None else str(live_details['template_id'])
+        elif active_doc is not None:
+            position_row = self._build_position_row_from_active(active_doc)
+            config = active_doc.config
+            template_id = active_doc.template_id
+        elif archive_doc is not None:
+            position_row = self._build_position_row_from_archive(archive_doc)
+            config = archive_doc.config
+            template_id = archive_doc.template_id
+        else:
+            raise RuntimeError(f'FrontendService.get_run_details: run not found: {run_id}')
+
         return FrontendRunDetailsView(
+            template_id=None if template_id is None else str(template_id),
+            config=config,
             position=position_row,
             iterations=iteration_rows,
         )

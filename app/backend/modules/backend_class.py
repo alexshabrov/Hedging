@@ -33,9 +33,19 @@ HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
 
 ### Run context ###
 class BackendRunContext:
-    def __init__(self, run_id: str, config: HedgerConfig, binance_key: str, binance_secret: str, private_key: str, wallet_address: Optional[str]) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        config: HedgerConfig,
+        binance_key: str,
+        binance_secret: str,
+        private_key: str,
+        wallet_address: Optional[str],
+        template_id: Optional[str] = None,
+    ) -> None:
         self.run_id = str(run_id)
         self.config = config
+        self.template_id = None if template_id is None else str(template_id)
         self.binance_key = str(binance_key)
         self.binance_secret = str(binance_secret)
         self.private_key = str(private_key)
@@ -95,7 +105,7 @@ class Backend:
             try:
                 payload = self._read_json_body()
                 req = BackendStartRunRequest.from_dict(payload)
-                run_id = self.start_run(req.config)
+                run_id = self.start_run(req.config, req.template_id)
                 return self._json_response({'ok': True, 'run_id': run_id}, 200)
             except Exception as exc:
                 self._logger.error(f'api_runs_start_failed error={exc} traceback=\n{traceback.format_exc()}')
@@ -166,7 +176,7 @@ class Backend:
 
         return payload
 
-    def start_run(self, config: HedgerConfig) -> str:
+    def start_run(self, config: HedgerConfig, template_id: Optional[str] = None) -> str:
         if config is None:
             raise RuntimeError('Backend.start_run: config is None')
         if not isinstance(config, HedgerConfig):
@@ -180,6 +190,7 @@ class Backend:
             binance_secret=str(self._binance_secret),
             private_key=str(self._private_key),
             wallet_address=str(self._wallet_address) if self._wallet_address is not None else None,
+            template_id=None if template_id is None else str(template_id),
         )
 
         with self._lock:
@@ -286,6 +297,8 @@ class Backend:
                 iterations.append(item)
 
         return BackendRunDetailsView(
+            template_id=None if ctx.template_id is None else str(ctx.template_id),
+            config=ctx.config,
             position=self._build_position_view(ctx),
             iterations=iterations,
         )
@@ -561,6 +574,7 @@ class Backend:
                 'updated_at_ms': int(ctx.updated_at_ms),
                 'stop_requested': bool(ctx.stop_requested),
                 'last_error': None if ctx.last_error is None else str(ctx.last_error),
+                'template_id': None if ctx.template_id is None else str(ctx.template_id),
                 'config': ctx.config.model_dump(),
                 'aggregates': ctx.aggregates.model_dump(),
                 'position': position.model_dump(),
@@ -580,6 +594,7 @@ class Backend:
                 'archived_at_ms': int(time.time() * 1000),
                 'stop_requested': bool(ctx.stop_requested),
                 'last_error': None if ctx.last_error is None else str(ctx.last_error),
+                'template_id': None if ctx.template_id is None else str(ctx.template_id),
                 'config': ctx.config.model_dump(),
                 'aggregates': ctx.aggregates.model_dump(),
                 'position': position.model_dump(),

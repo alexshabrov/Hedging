@@ -249,6 +249,7 @@ class FrontendActivePositionDoc(StrictModel):
     updated_at_ms: int
     stop_requested: bool
     last_error: Optional[str]
+    template_id: Optional[str]
     config: HedgerConfig
     aggregates: BackendRunAggregates
     position: BackendPositionView
@@ -264,6 +265,7 @@ class FrontendActivePositionDoc(StrictModel):
             updated_at_ms=int(data['updated_at_ms']),
             stop_requested=bool(data['stop_requested']),
             last_error=None if data['last_error'] is None else str(data['last_error']),
+            template_id=None if ('template_id' not in data or data['template_id'] is None) else str(data['template_id']),
             config=HedgerConfig.from_dict(data['config']),
             aggregates=BackendRunAggregates(**data['aggregates']),
             position=frontend_position_view_from_dict(data['position']),
@@ -280,6 +282,7 @@ class FrontendArchivePositionDoc(StrictModel):
     archived_at_ms: int
     stop_requested: bool
     last_error: Optional[str]
+    template_id: Optional[str]
     config: HedgerConfig
     aggregates: BackendRunAggregates
     position: BackendPositionView
@@ -296,6 +299,7 @@ class FrontendArchivePositionDoc(StrictModel):
             archived_at_ms=int(data['archived_at_ms']),
             stop_requested=bool(data['stop_requested']),
             last_error=None if data['last_error'] is None else str(data['last_error']),
+            template_id=None if ('template_id' not in data or data['template_id'] is None) else str(data['template_id']),
             config=HedgerConfig.from_dict(data['config']),
             aggregates=BackendRunAggregates(**data['aggregates']),
             position=frontend_position_view_from_dict(data['position']),
@@ -731,6 +735,8 @@ class FrontendIterationRow(StrictModel):
 
 
 class FrontendRunDetailsView(StrictModel):
+    template_id: Optional[str]
+    config: HedgerConfig
     position: FrontendPositionRow
     iterations: List[FrontendIterationRow]
 
@@ -740,6 +746,8 @@ class FrontendRunDetailsView(StrictModel):
             out_iterations.append(item.model_dump())
 
         return {
+            'template_id': self.template_id,
+            'config': self.config.model_dump(),
             'position': self.position.model_dump(),
             'iterations': out_iterations,
         }

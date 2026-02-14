@@ -23,10 +23,12 @@ class BackendRunLifecycle(str, Enum):
 
 ### Models ###
 class BackendStartRunRequest(StrictModel):
+    template_id: Optional[str] = None
     config: HedgerConfig
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
+            'template_id': self.template_id,
             'config': self.config.model_dump(),
         }
 
@@ -39,7 +41,12 @@ class BackendStartRunRequest(StrictModel):
         if 'config' not in data:
             raise RuntimeError('BackendStartRunRequest.from_dict: config is missing')
 
+        template_id = None
+        if 'template_id' in data and data['template_id'] is not None:
+            template_id = str(data['template_id'])
+
         return cls(
+            template_id=template_id,
             config=HedgerConfig.from_dict(data['config']),
         )
 
@@ -189,6 +196,8 @@ class BackendPositionView(StrictModel):
 
 
 class BackendRunDetailsView(StrictModel):
+    template_id: Optional[str]
+    config: HedgerConfig
     position: BackendPositionView
     iterations: List[BackendIterationRecord]
 
@@ -198,6 +207,8 @@ class BackendRunDetailsView(StrictModel):
             out_iterations.append(item.model_dump())
 
         return {
+            'template_id': self.template_id,
+            'config': self.config.model_dump(),
             'position': self.position.model_dump(),
             'iterations': out_iterations,
         }
