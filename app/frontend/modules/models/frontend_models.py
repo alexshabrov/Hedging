@@ -829,9 +829,6 @@ class FrontendIterationLpBlock(StrictModel):
     fees_quote: float
     price_pnl_quote: float
     impermanent_loss_quote: float
-    apr_fees_pct: float
-    apr_price_pct: float
-    apr_total_pct: float
 
 
 class FrontendIterationHedgeBlock(StrictModel):

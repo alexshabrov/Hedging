@@ -597,10 +597,6 @@ class FrontendService:
             closed_base = 0.0 if uniswap.decrease.amount_base is None else float(uniswap.decrease.amount_base)
             closed_quote = 0.0 if uniswap.decrease.amount_quote is None else float(uniswap.decrease.amount_quote)
 
-        apr_price_pct = self._calc_apr(float(pnl.dex_realized_il_quote), float(calc.total_quote), float(pnl.pool_hold_seconds))
-        apr_fees_pct = self._calc_apr(float(pnl.fees_received_quote), float(calc.total_quote), float(pnl.pool_hold_seconds))
-        apr_total_pct = self._calc_apr(float(row.pnl_without_hedge_quote), float(calc.total_quote), float(pnl.pool_hold_seconds))
-
         return FrontendIterationLpBlock(
             base_price=float(calc.base_price),
             price_lower=float(calc.price_lower),
@@ -612,9 +608,6 @@ class FrontendService:
             fees_quote=float(pnl.fees_received_quote),
             price_pnl_quote=float(pnl.dex_realized_il_quote),
             impermanent_loss_quote=float(-pnl.dex_realized_il_quote),
-            apr_fees_pct=float(apr_fees_pct),
-            apr_price_pct=float(apr_price_pct),
-            apr_total_pct=float(apr_total_pct),
         )
 
     def _build_hedge_block(self, row: FrontendIterationDoc) -> FrontendIterationHedgeBlock:
