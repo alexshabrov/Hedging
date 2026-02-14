@@ -95,6 +95,17 @@ class RunsModule:
             view = self._service.get_run_details(str(run_id))
             return render_template('modules/run_details.html', title='Run details', details=view.model_dump())
 
+        @app.route('/api/runs/<run_id>/details', methods=['GET'])
+        @login_required
+        def run_details_api(run_id: str):
+            try:
+                view = self._service.get_run_details(str(run_id))
+                return {'ok': True, 'item': view.model_dump()}, 200
+            except Exception:
+                _t, exc, _tb = sys.exc_info()
+                self._logger.error(f'run_details_api_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
+                return {'ok': False, 'error': str(exc)}, 400
+
         @app.route('/runs/<run_id>/stop', methods=['POST'])
         @login_required
         def run_stop_page(run_id: str):

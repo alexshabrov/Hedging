@@ -1,6 +1,6 @@
 {% include '_header.html' %}
 
-<div class="content-wrapper">
+<div class="content-wrapper" id="run-details-root" data-run-id="{{ details.position.run_id }}">
     <div class="container-fluid">
         <div class="row pt-3">
             <div class="col-sm-12">
@@ -20,9 +20,9 @@
                     <div class="card-header">Run {{ details.position.run_id }}</div>
                     <div class="card-body">
                         <form method="POST" action="/runs/{{ details.position.run_id }}/stop">
-                            {% if details.position.status in ['initialized', 'running', 'stopping'] %}
-                            <button type="submit" class="btn btn-danger btn-sm">Stop run</button>
-                            {% endif %}
+                            <span id="run-stop-wrap" {% if details.position.status not in ['initialized', 'running', 'stopping'] %}style="display:none;"{% endif %}>
+                                <button type="submit" class="btn btn-danger btn-sm">Stop run</button>
+                            </span>
                             <a href="/positions" class="btn btn-secondary btn-sm">Back to positions</a>
                         </form>
 
@@ -30,31 +30,27 @@
 
                         <table class="table table-sm table-bordered">
                             <tbody>
-                                <tr><th>Status</th><td>{{ details.position.status }}</td></tr>
-                                <tr><th>Symbol</th><td>{{ details.position.symbol }}</td></tr>
-                                <tr><th>Started (UTC)</th><td>{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
-                                <tr><th>Runtime</th><td>{{ details.position.runtime_dhm }}</td></tr>
-                                <tr><th>Total quote</th><td>{{ '%.4f'|format(details.position.total_quote) }}</td></tr>
-                                <tr><th>PnL with hedge</th><td>{{ '%.4f'|format(details.position.pnl_with_hedge_quote) }}</td></tr>
-                                <tr><th>PnL without hedge</th><td>{{ '%.4f'|format(details.position.pnl_without_hedge_quote) }}</td></tr>
-                                <tr><th>APR with hedge %</th><td>{{ '%.4f'|format(details.position.apr_with_hedge_pct) }}</td></tr>
-                                <tr><th>APR without hedge %</th><td>{{ '%.4f'|format(details.position.apr_without_hedge_pct) }}</td></tr>
+                                <tr><th>Status</th><td id="run-status">{{ details.position.status }}</td></tr>
+                                <tr><th>Symbol</th><td id="run-symbol">{{ details.position.symbol }}</td></tr>
+                                <tr><th>Started (UTC)</th><td id="run-started">{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
+                                <tr><th>Runtime</th><td id="run-runtime">{{ details.position.runtime_dhm }}</td></tr>
+                                <tr><th>Total quote</th><td id="run-total-quote">{{ '%.4f'|format(details.position.total_quote) }}</td></tr>
+                                <tr><th>PnL with hedge</th><td id="run-pnl-with">{{ '%.4f'|format(details.position.pnl_with_hedge_quote) }}</td></tr>
+                                <tr><th>PnL without hedge</th><td id="run-pnl-without">{{ '%.4f'|format(details.position.pnl_without_hedge_quote) }}</td></tr>
+                                <tr><th>APR with hedge %</th><td id="run-apr-with">{{ '%.4f'|format(details.position.apr_with_hedge_pct) }}</td></tr>
+                                <tr><th>APR without hedge %</th><td id="run-apr-without">{{ '%.4f'|format(details.position.apr_without_hedge_pct) }}</td></tr>
                             </tbody>
                         </table>
 
-                        {% if details.failure_reason or details.failure_error_raw %}
+                        <div id="failure-block" {% if not details.failure_reason and not details.failure_error_raw %}style="display:none;"{% endif %}>
                         <h6 class="mt-3 text-danger">Failure reason</h6>
                         <table class="table table-sm table-bordered">
                             <tbody>
-                                {% if details.failure_reason %}
-                                <tr><th>Detailed explanation</th><td><pre style="margin:0; white-space:pre-wrap;">{{ details.failure_reason }}</pre></td></tr>
-                                {% endif %}
-                                {% if details.failure_error_raw %}
-                                <tr><th>Backend error (raw)</th><td><pre style="margin:0; white-space:pre-wrap;">{{ details.failure_error_raw }}</pre></td></tr>
-                                {% endif %}
+                                <tr id="failure-reason-row" {% if not details.failure_reason %}style="display:none;"{% endif %}><th>Detailed explanation</th><td><pre id="failure-reason" style="margin:0; white-space:pre-wrap;">{{ details.failure_reason }}</pre></td></tr>
+                                <tr id="failure-raw-row" {% if not details.failure_error_raw %}style="display:none;"{% endif %}><th>Backend error (raw)</th><td><pre id="failure-raw" style="margin:0; white-space:pre-wrap;">{{ details.failure_error_raw }}</pre></td></tr>
                             </tbody>
                         </table>
-                        {% endif %}
+                        </div>
 
                         <h6 class="mt-3">Run config</h6>
                         <table class="table table-sm table-bordered">
@@ -103,7 +99,7 @@
                                     <th>APR without hedge %</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody id="iterations-body">
                                 {% for row in details.iterations %}
                                     <tr>
                                         <td>{{ row.iteration_no }}</td>
@@ -128,12 +124,6 @@
     </div>
 </div>
 
-{% if details.position.status in ['initialized', 'running', 'stopping'] %}
-<script>
-setTimeout(function() {
-    window.location.reload();
-}, 3000);
-</script>
-{% endif %}
+<script src="{{ url_for('static', filename='js/run_details.js') }}"></script>
 
 {% include '_footer.html' %}

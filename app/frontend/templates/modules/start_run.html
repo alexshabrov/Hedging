@@ -19,7 +19,7 @@
                 <div class="card">
                     <div class="card-header">Create run template</div>
                     <div class="card-body">
-                        <form method="POST" action="/runs/start">
+                        <form method="POST" action="/runs/start" id="start-run-form">
                             <input type="hidden" name="action" value="create_template">
 
                             <div class="form-row">
@@ -232,5 +232,7 @@
         </div>
     </div>
 </div>
+
+<script src="{{ url_for('static', filename='js/start_run.js') }}"></script>
 
 {% include '_footer.html' %}
