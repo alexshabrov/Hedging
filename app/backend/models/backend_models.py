@@ -165,6 +165,7 @@ class BackendPositionView(StrictModel):
     price_pnl_quote: float
     hedge_pnl_quote: float
     costs_quote: float
+    token_id: Optional[int]
     last_error: Optional[str]
 
     def model_dump(self) -> dict:  # type: ignore[override]
@@ -191,6 +192,7 @@ class BackendPositionView(StrictModel):
             'price_pnl_quote': float(self.price_pnl_quote),
             'hedge_pnl_quote': float(self.hedge_pnl_quote),
             'costs_quote': float(self.costs_quote),
+            'token_id': None if self.token_id is None else int(self.token_id),
             'last_error': self.last_error,
         }
 

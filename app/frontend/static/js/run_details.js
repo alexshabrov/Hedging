@@ -157,6 +157,7 @@
         }
         var p = item.position;
         setHtml('run-status', statusBadgeHtml(p.status));
+        setText('run-token-id', p.token_id);
         setText('run-symbol', p.symbol);
         setText('run-started', utcTs(p.first_started_at_ms));
         setText('run-runtime', p.runtime_dhm);

@@ -31,6 +31,7 @@
                         <table class="table table-sm table-bordered">
                             <tbody>
                                 <tr><th>Status</th><td id="run-status">{% with status=details.position.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
+                                <tr><th>Token ID</th><td id="run-token-id">{{ details.position.token_id if details.position.token_id is not none else '-' }}</td></tr>
                                 <tr><th>Symbol</th><td id="run-symbol">{{ details.position.symbol }}</td></tr>
                                 <tr><th>Started (UTC)</th><td id="run-started">{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
                                 <tr><th>Runtime</th><td id="run-runtime">{{ details.position.runtime_dhm }}</td></tr>

@@ -340,6 +340,21 @@ class Backend:
                 if ctx.current_hedger._cw is not None:
                     market_price = float(ctx.current_hedger._cw.get_current_traditional_price())
 
+            token_id = None
+            if ctx.current_hedger is not None and ctx.current_hedger._run_token_id is not None:
+                if int(ctx.current_hedger._run_token_id) > 0:
+                    token_id = int(ctx.current_hedger._run_token_id)
+            if token_id is None:
+                for item in reversed(ctx.iterations):
+                    if item.stats is None or item.stats.uniswap is None:
+                        continue
+                    if item.stats.uniswap.token_id is None:
+                        continue
+                    if int(item.stats.uniswap.token_id) <= 0:
+                        continue
+                    token_id = int(item.stats.uniswap.token_id)
+                    break
+
             return BackendPositionView(
                 run_id=str(ctx.run_id),
                 symbol=str(ctx.config.symbol),
@@ -363,6 +378,7 @@ class Backend:
                 price_pnl_quote=float(ctx.aggregates.sum_price_pnl_quote),
                 hedge_pnl_quote=float(ctx.aggregates.sum_cex_pnl_quote),
                 costs_quote=float(ctx.aggregates.sum_costs_quote),
+                token_id=None if token_id is None else int(token_id),
                 last_error=None if ctx.last_error is None else str(ctx.last_error),
             )
 

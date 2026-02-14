@@ -506,6 +506,7 @@ class FrontendService:
             price_pnl_quote=float(position.price_pnl_quote),
             hedge_pnl_quote=float(position.hedge_pnl_quote),
             costs_quote=float(position.costs_quote),
+            token_id=None if position.token_id is None else int(position.token_id),
             last_error=None if position.last_error is None else str(position.last_error),
             iterations_count=int(iterations_count),
             is_active=bool(is_active),

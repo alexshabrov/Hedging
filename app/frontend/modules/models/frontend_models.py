@@ -40,6 +40,7 @@ def frontend_position_view_from_dict(data: dict) -> BackendPositionView:
         price_pnl_quote=float(data['price_pnl_quote']),
         hedge_pnl_quote=float(data['hedge_pnl_quote']),
         costs_quote=float(data['costs_quote']),
+        token_id=None if data.get('token_id') is None else int(data['token_id']),
         last_error=None if data['last_error'] is None else str(data['last_error']),
     )
 
@@ -663,6 +664,7 @@ class FrontendPositionRow(StrictModel):
     price_pnl_quote: float
     hedge_pnl_quote: float
     costs_quote: float
+    token_id: Optional[int]
     last_error: Optional[str]
     iterations_count: int
     is_active: bool
@@ -701,6 +703,7 @@ class FrontendPositionRow(StrictModel):
             'price_pnl_quote': float(self.price_pnl_quote),
             'hedge_pnl_quote': float(self.hedge_pnl_quote),
             'costs_quote': float(self.costs_quote),
+            'token_id': None if self.token_id is None else int(self.token_id),
             'last_error': self.last_error,
             'iterations_count': int(self.iterations_count),
             'is_active': bool(self.is_active),
