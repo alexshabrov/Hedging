@@ -132,6 +132,20 @@ class StorageService:
         if res is None:
             raise RuntimeError('StorageService.create_run_template: replace_one returned None')
 
+    def update_run_template(self, template: FrontendRunTemplateDoc) -> None:
+        if template is None:
+            raise RuntimeError('StorageService.update_run_template: template is None')
+        if not isinstance(template, FrontendRunTemplateDoc):
+            raise RuntimeError(f'StorageService.update_run_template: template is not FrontendRunTemplateDoc: {type(template)}')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        doc = template.model_dump()
+        res = col.replace_one({'template_id': str(template.template_id)}, doc, upsert=False)
+        if res is None:
+            raise RuntimeError('StorageService.update_run_template: replace_one returned None')
+        if int(res.matched_count) <= 0:
+            raise RuntimeError(f'StorageService.update_run_template: template not found: {template.template_id}')
+
     def find_run_template(self, template_id: str) -> FrontendRunTemplateDoc:
         if not isinstance(template_id, str) or len(template_id) == 0:
             raise RuntimeError('StorageService.find_run_template: template_id is empty')
@@ -143,3 +157,14 @@ class StorageService:
         if not isinstance(item, dict):
             raise RuntimeError(f'StorageService.find_run_template: item is not dict: {type(item)}')
         return FrontendRunTemplateDoc.from_dict(item)
+
+    def delete_run_template(self, template_id: str) -> None:
+        if not isinstance(template_id, str) or len(template_id) == 0:
+            raise RuntimeError('StorageService.delete_run_template: template_id is empty')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        res = col.delete_one({'template_id': str(template_id)})
+        if res is None:
+            raise RuntimeError('StorageService.delete_run_template: delete_one returned None')
+        if int(res.deleted_count) <= 0:
+            raise RuntimeError(f'StorageService.delete_run_template: template not found: {template_id}')

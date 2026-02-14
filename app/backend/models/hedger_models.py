@@ -79,6 +79,39 @@ class HedgerConfig(StrictModel):
             'cowswap_poll_interval_sec': int(self.cowswap_poll_interval_sec),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'HedgerConfig':
+        if data is None:
+            raise RuntimeError('HedgerConfig.from_dict: data is None')
+        if not isinstance(data, dict):
+            raise RuntimeError(f'HedgerConfig.from_dict: data is not dict: {type(data)}')
+
+        return cls(
+            symbol=str(data['symbol']),
+            rpc_url=str(data['rpc_url']),
+            network=str(data['network']),
+            pool_address=str(data['pool_address']),
+            fee_pct=float(data['fee_pct']),
+            price_lower=None if data['price_lower'] is None else float(data['price_lower']),
+            price_upper=None if data['price_upper'] is None else float(data['price_upper']),
+            price_lower_pct=None if data['price_lower_pct'] is None else float(data['price_lower_pct']),
+            price_upper_pct=None if data['price_upper_pct'] is None else float(data['price_upper_pct']),
+            total_quote=float(data['total_quote']),
+            cex_ratio=float(data['cex_ratio']),
+            trigger_mode=CexTriggerMode(str(data['trigger_mode'])),
+            trigger_pct=float(data['trigger_pct']),
+            trigger_units=int(data['trigger_units']),
+            mongo_uri=str(data['mongo_uri']),
+            mongo_db=str(data['mongo_db']),
+            mongo_collection=str(data['mongo_collection']),
+            tick_ms=int(data['tick_ms']),
+            gtx_cooldown_ms=int(data['gtx_cooldown_ms']),
+            entrance_timeout_ms=int(data['entrance_timeout_ms']),
+            cowswap_api_timeout_sec=int(data['cowswap_api_timeout_sec']),
+            cowswap_wait_timeout_sec=int(data['cowswap_wait_timeout_sec']),
+            cowswap_poll_interval_sec=int(data['cowswap_poll_interval_sec']),
+        )
+
 
 class HedgeCalcStats(StrictModel):
     base_price: float

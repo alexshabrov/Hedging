@@ -3,7 +3,7 @@ Backend service module
 Date: 2026-02-13
 Version: 1.1
 """
-import sys, time, threading, uuid
+import sys, time, threading, uuid, traceback
 from typing import Dict, List, Optional, Tuple
 import orjson
 
@@ -97,8 +97,8 @@ class Backend:
                 req = BackendStartRunRequest.from_dict(payload)
                 run_id = self.start_run(req.config)
                 return self._json_response({'ok': True, 'run_id': run_id}, 200)
-            except Exception:
-                _t, exc, _tb = sys.exc_info()
+            except Exception as exc:
+                self._logger.error(f'api_runs_start_failed error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
         @self._app.route('/api/runs/<run_id>/stop', methods=['POST'])
@@ -106,8 +106,8 @@ class Backend:
             try:
                 self.stop_run(str(run_id))
                 return self._json_response({'ok': True, 'run_id': str(run_id)}, 200)
-            except Exception:
-                _t, exc, _tb = sys.exc_info()
+            except Exception as exc:
+                self._logger.error(f'api_run_stop_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
         @self._app.route('/api/positions', methods=['GET'])
@@ -118,8 +118,8 @@ class Backend:
                 for row in rows:
                     out.append(row.model_dump())
                 return self._json_response({'ok': True, 'items': out}, 200)
-            except Exception:
-                _t, exc, _tb = sys.exc_info()
+            except Exception as exc:
+                self._logger.error(f'api_positions_failed error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
         @self._app.route('/api/positions/active', methods=['GET'])
@@ -127,8 +127,8 @@ class Backend:
             try:
                 docs = self.list_positions_active_docs()
                 return self._json_response({'ok': True, 'items': docs}, 200)
-            except Exception:
-                _t, exc, _tb = sys.exc_info()
+            except Exception as exc:
+                self._logger.error(f'api_positions_active_failed error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
         @self._app.route('/api/positions/archive', methods=['GET'])
@@ -136,8 +136,8 @@ class Backend:
             try:
                 docs = self.list_positions_archive_docs()
                 return self._json_response({'ok': True, 'items': docs}, 200)
-            except Exception:
-                _t, exc, _tb = sys.exc_info()
+            except Exception as exc:
+                self._logger.error(f'api_positions_archive_failed error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
         @self._app.route('/api/runs/<run_id>', methods=['GET'])
@@ -145,8 +145,8 @@ class Backend:
             try:
                 details = self.get_run_details(str(run_id))
                 return self._json_response({'ok': True, 'item': details.model_dump()}, 200)
-            except Exception:
-                _t, exc, _tb = sys.exc_info()
+            except Exception as exc:
+                self._logger.error(f'api_run_details_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
     def _json_response(self, payload: dict, status_code: int) -> Response:

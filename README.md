@@ -403,7 +403,7 @@ CLI точка входа full-run.
     "price_lower": 1900.0,
     "price_upper": 2124.68,
     "total_quote": 1000.0,
-    "cex_ratio": 0.5,
+    "cex_ratio": 0.255,
     "trigger_offset_pct_x10000": 558,
     "target_offset_pct_x10000": 558,
     "hedge_quote": 500.0
@@ -541,7 +541,7 @@ python app/backend/hedger_cli.py \
   --price-lower 1900 \
   --price-upper 2100 \
   --total-quote 1000 \
-  --cex-ratio 0.5 \
+  --cex-ratio 0.255 \
   --mongo-uri mongodb://hedging_mongo:27017 \
   --mongo-db hedging \
   --mongo-collection hedge_runs

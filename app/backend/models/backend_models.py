@@ -40,7 +40,7 @@ class BackendStartRunRequest(StrictModel):
             raise RuntimeError('BackendStartRunRequest.from_dict: config is missing')
 
         return cls(
-            config=HedgerConfig(**data['config']),
+            config=HedgerConfig.from_dict(data['config']),
         )
 
     @classmethod

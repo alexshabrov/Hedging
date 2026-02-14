@@ -178,6 +178,21 @@ class FrontendRunTemplateDoc(StrictModel):
     created_at_ms: int
     updated_at_ms: int
 
+    def model_dump(self) -> dict:  # type: ignore[override]
+        return {
+            'template_id': str(self.template_id),
+            'network': str(self.network),
+            'symbol': str(self.symbol),
+            'pool_address': str(self.pool_address),
+            'fee_pct': float(self.fee_pct),
+            'cex_ratio': float(self.cex_ratio),
+            'trigger_mode': str(self.trigger_mode.value),
+            'trigger_pct': float(self.trigger_pct),
+            'trigger_units': int(self.trigger_units),
+            'created_at_ms': int(self.created_at_ms),
+            'updated_at_ms': int(self.updated_at_ms),
+        }
+
     @classmethod
     def from_dict(cls, data: dict) -> 'FrontendRunTemplateDoc':
         return cls(
@@ -213,6 +228,18 @@ class FrontendStartFromTemplateForm(StrictModel):
     price_upper_pct: float
 
 
+class FrontendUpdateTemplateForm(StrictModel):
+    template_id: str
+    network: str
+    symbol: str
+    pool_address: str
+    fee_pct: float
+    cex_ratio: float
+    trigger_mode: CexTriggerMode
+    trigger_pct: float
+    trigger_units: int
+
+
 ### Storage models ###
 class FrontendActivePositionDoc(StrictModel):
     run_id: str
@@ -237,7 +264,7 @@ class FrontendActivePositionDoc(StrictModel):
             updated_at_ms=int(data['updated_at_ms']),
             stop_requested=bool(data['stop_requested']),
             last_error=None if data['last_error'] is None else str(data['last_error']),
-            config=HedgerConfig(**data['config']),
+            config=HedgerConfig.from_dict(data['config']),
             aggregates=BackendRunAggregates(**data['aggregates']),
             position=frontend_position_view_from_dict(data['position']),
             iterations_count=int(data['iterations_count']),
@@ -269,7 +296,7 @@ class FrontendArchivePositionDoc(StrictModel):
             archived_at_ms=int(data['archived_at_ms']),
             stop_requested=bool(data['stop_requested']),
             last_error=None if data['last_error'] is None else str(data['last_error']),
-            config=HedgerConfig(**data['config']),
+            config=HedgerConfig.from_dict(data['config']),
             aggregates=BackendRunAggregates(**data['aggregates']),
             position=frontend_position_view_from_dict(data['position']),
             iterations_count=int(data['iterations_count']),
@@ -800,7 +827,6 @@ class FrontendIterationHedgeChaseRow(StrictModel):
 class FrontendDashboardView(StrictModel):
     active_runs: int
     finished_iterations: int
-    total_invested_quote: float
     total_pnl_with_hedge_quote: float
     total_pnl_without_hedge_quote: float
     total_costs_quote: float
@@ -813,7 +839,6 @@ class FrontendDashboardView(StrictModel):
         return {
             'active_runs': int(self.active_runs),
             'finished_iterations': int(self.finished_iterations),
-            'total_invested_quote': float(self.total_invested_quote),
             'total_pnl_with_hedge_quote': float(self.total_pnl_with_hedge_quote),
             'total_pnl_without_hedge_quote': float(self.total_pnl_without_hedge_quote),
             'total_costs_quote': float(self.total_costs_quote),

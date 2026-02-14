@@ -11,9 +11,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(BASE_DIR, 'app')
 
 
-import envcheck
-from backend.modules.backend_env import required_env as backend_required_env
-from frontend.modules.frontend_env import required_env as frontend_required_env
+import app.envcheck as envcheck
+from app.backend.modules.backend_env import required_env as backend_required_env
+from app.frontend.modules.frontend_env import required_env as frontend_required_env
 
 
 RUN: List[Dict[str, str]] = [

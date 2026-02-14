@@ -177,13 +177,13 @@ Body:
     "rpc_url": "https://...",
     "network": "mainnet",
     "pool_address": "0x...",
-    "fee_pct": 0.3,
+    "fee_pct": 0.05,
     "price_lower": 2500.0,
     "price_upper": 2700.0,
     "price_lower_pct": null,
     "price_upper_pct": null,
     "total_quote": 1000.0,
-    "cex_ratio": 0.5,
+    "cex_ratio": 0.255,
     "trigger_mode": "small_pct",
     "trigger_pct": 0.05,
     "mongo_uri": "mongodb://hedging_mongo:27017",
@@ -276,7 +276,7 @@ Start:
 ```bash
 curl -s -X POST http://127.0.0.1:8080/api/runs/start \
   -H "Content-Type: application/json" \
-  -d '{"config":{"symbol":"ETHUSDC","rpc_url":"https://...","network":"mainnet","pool_address":"0x...","fee_pct":0.3,"price_lower":2500.0,"price_upper":2700.0,"price_lower_pct":null,"price_upper_pct":null,"total_quote":1000.0,"cex_ratio":0.5,"trigger_mode":"small_pct","trigger_pct":0.05,"mongo_uri":"mongodb://hedging_mongo:27017","mongo_db":"hedging","mongo_collection":"hedge_runs","tick_ms":5,"gtx_cooldown_ms":5,"entrance_timeout_ms":60000,"cowswap_api_timeout_sec":10,"cowswap_wait_timeout_sec":300,"cowswap_poll_interval_sec":3}}'
+  -d '{"config":{"symbol":"ETHUSDC","rpc_url":"https://...","network":"mainnet","pool_address":"0x...","fee_pct":0.05,"price_lower":2500.0,"price_upper":2700.0,"price_lower_pct":null,"price_upper_pct":null,"total_quote":1000.0,"cex_ratio":0.255,"trigger_mode":"small_pct","trigger_pct":0.05,"mongo_uri":"mongodb://hedging_mongo:27017","mongo_db":"hedging","mongo_collection":"hedge_runs","tick_ms":5,"gtx_cooldown_ms":5,"entrance_timeout_ms":60000,"cowswap_api_timeout_sec":10,"cowswap_wait_timeout_sec":300,"cowswap_poll_interval_sec":3}}'
 ```
 
 Stop:

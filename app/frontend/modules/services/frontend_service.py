@@ -24,6 +24,7 @@ from frontend.modules.models.frontend_models import (
     FrontendIterationRebalanceBlock,
     FrontendRuntimeConfig,
     FrontendStartFromTemplateForm,
+    FrontendUpdateTemplateForm,
     FrontendPositionRow,
     FrontendRunTemplateDoc,
     FrontendRunDetailsView,
@@ -58,13 +59,27 @@ class FrontendService:
     def list_network_configs(self) -> List[FrontendDexNetworkConfig]:
         return self._network_configs
 
+    def get_run_template(self, template_id: str) -> FrontendRunTemplateDoc:
+        if not isinstance(template_id, str) or len(template_id) == 0:
+            raise RuntimeError('FrontendService.get_run_template: template_id is empty')
+        return self._storage.find_run_template(str(template_id))
+
     def create_run_template(self, form: FrontendCreateTemplateForm) -> FrontendRunTemplateDoc:
         if form is None:
             raise RuntimeError('FrontendService.create_run_template: form is None')
         if not isinstance(form, FrontendCreateTemplateForm):
             raise RuntimeError(f'FrontendService.create_run_template: form is not FrontendCreateTemplateForm: {type(form)}')
 
-        self._validate_template_form(form)
+        self._validate_template_form(
+            network=str(form.network),
+            symbol=str(form.symbol),
+            pool_address=str(form.pool_address),
+            fee_pct=float(form.fee_pct),
+            cex_ratio=float(form.cex_ratio),
+            trigger_mode=form.trigger_mode,
+            trigger_pct=float(form.trigger_pct),
+            trigger_units=int(form.trigger_units),
+        )
 
         now_ms = int(time.time() * 1000)
         template = FrontendRunTemplateDoc(
@@ -83,6 +98,52 @@ class FrontendService:
         self._storage.create_run_template(template)
         self._logger.info(f'frontend_create_template_ok template_id={template.template_id}')
         return template
+
+    def update_run_template(self, form: FrontendUpdateTemplateForm) -> FrontendRunTemplateDoc:
+        if form is None:
+            raise RuntimeError('FrontendService.update_run_template: form is None')
+        if not isinstance(form, FrontendUpdateTemplateForm):
+            raise RuntimeError(f'FrontendService.update_run_template: form is not FrontendUpdateTemplateForm: {type(form)}')
+        if not isinstance(form.template_id, str) or len(form.template_id) == 0:
+            raise RuntimeError('FrontendService.update_run_template: template_id is empty')
+
+        self._validate_template_form(
+            network=str(form.network),
+            symbol=str(form.symbol),
+            pool_address=str(form.pool_address),
+            fee_pct=float(form.fee_pct),
+            cex_ratio=float(form.cex_ratio),
+            trigger_mode=form.trigger_mode,
+            trigger_pct=float(form.trigger_pct),
+            trigger_units=int(form.trigger_units),
+        )
+
+        current = self._storage.find_run_template(str(form.template_id))
+        now_ms = int(time.time() * 1000)
+        template = FrontendRunTemplateDoc(
+            template_id=str(current.template_id),
+            network=str(form.network),
+            symbol=str(form.symbol),
+            pool_address=str(form.pool_address),
+            fee_pct=float(form.fee_pct),
+            cex_ratio=float(form.cex_ratio),
+            trigger_mode=form.trigger_mode,
+            trigger_pct=float(form.trigger_pct),
+            trigger_units=int(form.trigger_units),
+            created_at_ms=int(current.created_at_ms),
+            updated_at_ms=int(now_ms),
+        )
+
+        self._storage.update_run_template(template)
+        self._logger.info(f'frontend_update_template_ok template_id={template.template_id}')
+        return template
+
+    def delete_run_template(self, template_id: str) -> None:
+        if not isinstance(template_id, str) or len(template_id) == 0:
+            raise RuntimeError('FrontendService.delete_run_template: template_id is empty')
+
+        self._storage.delete_run_template(str(template_id))
+        self._logger.info(f'frontend_delete_template_ok template_id={template_id}')
 
     def start_run_from_template(self, form: FrontendStartFromTemplateForm) -> str:
         if form is None:
@@ -258,7 +319,6 @@ class FrontendService:
         return FrontendDashboardView(
             active_runs=int(active_runs),
             finished_iterations=int(finished_iterations),
-            total_invested_quote=float(total_invested_quote),
             total_pnl_with_hedge_quote=float(total_pnl_with_hedge_quote),
             total_pnl_without_hedge_quote=float(total_pnl_without_hedge_quote),
             total_costs_quote=float(total_costs_quote),
@@ -530,32 +590,42 @@ class FrontendService:
         seconds_per_year = 365.0 * 24.0 * 60.0 * 60.0
         return (float(pnl_quote) / float(total_quote)) * (float(seconds_per_year) / float(hold_sec)) * 100.0
 
-    def _validate_template_form(self, form: FrontendCreateTemplateForm) -> None:
-        if len(str(form.network)) == 0:
+    def _validate_template_form(
+        self,
+        network: str,
+        symbol: str,
+        pool_address: str,
+        fee_pct: float,
+        cex_ratio: float,
+        trigger_mode: CexTriggerMode,
+        trigger_pct: float,
+        trigger_units: int,
+    ) -> None:
+        if len(str(network)) == 0:
             raise RuntimeError('FrontendService._validate_template_form: network is empty')
-        if len(str(form.symbol)) == 0:
+        if len(str(symbol)) == 0:
             raise RuntimeError('FrontendService._validate_template_form: symbol is empty')
-        if len(str(form.pool_address)) == 0:
+        if len(str(pool_address)) == 0:
             raise RuntimeError('FrontendService._validate_template_form: pool_address is empty')
-        if float(form.fee_pct) <= 0.0:
+        if float(fee_pct) <= 0.0:
             raise RuntimeError('FrontendService._validate_template_form: fee_pct must be > 0')
-        if float(form.cex_ratio) <= 0.0:
+        if float(cex_ratio) <= 0.0:
             raise RuntimeError('FrontendService._validate_template_form: cex_ratio must be > 0')
-        if float(form.cex_ratio) > 1.0:
+        if float(cex_ratio) > 1.0:
             raise RuntimeError('FrontendService._validate_template_form: cex_ratio must be <= 1')
 
-        if form.trigger_mode == CexTriggerMode.PCT:
-            if float(form.trigger_pct) <= 0.0:
+        if trigger_mode == CexTriggerMode.PCT:
+            if float(trigger_pct) <= 0.0:
                 raise RuntimeError('FrontendService._validate_template_form: trigger_pct must be > 0 for pct mode')
-            if int(form.trigger_units) != 0:
+            if int(trigger_units) != 0:
                 raise RuntimeError('FrontendService._validate_template_form: trigger_units must be 0 for pct mode')
-        elif form.trigger_mode == CexTriggerMode.UNITS:
-            if int(form.trigger_units) <= 0:
+        elif trigger_mode == CexTriggerMode.UNITS:
+            if int(trigger_units) <= 0:
                 raise RuntimeError('FrontendService._validate_template_form: trigger_units must be > 0 for units mode')
-            if float(form.trigger_pct) != 0.0:
+            if float(trigger_pct) != 0.0:
                 raise RuntimeError('FrontendService._validate_template_form: trigger_pct must be 0 for units mode')
         else:
-            raise RuntimeError(f'FrontendService._validate_template_form: unsupported trigger_mode: {form.trigger_mode}')
+            raise RuntimeError(f'FrontendService._validate_template_form: unsupported trigger_mode: {trigger_mode}')
 
     def _build_rpc_url_for_network(self, network: str) -> str:
         if not isinstance(network, str) or len(network) == 0:
