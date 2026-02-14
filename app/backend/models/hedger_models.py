@@ -22,8 +22,8 @@ class HedgeRunStatus(str, Enum):
 
 
 class CexTriggerMode(str, Enum):
-    ONE_TICK = 'one_tick'
-    SMALL_PCT = 'small_pct'
+    PCT = 'pct'
+    UNITS = 'units'
 
 
 ### Models ###
@@ -38,9 +38,10 @@ class HedgerConfig(StrictModel):
     price_lower_pct: Optional[float] = None
     price_upper_pct: Optional[float] = None
     total_quote: float
-    cex_ratio: float = 0.5
+    cex_ratio: float = 0.255
     trigger_mode: CexTriggerMode
-    trigger_pct: float = 0.05
+    trigger_pct: float = 0.0
+    trigger_units: int = 0
     mongo_uri: str
     mongo_db: str
     mongo_collection: str
@@ -66,6 +67,7 @@ class HedgerConfig(StrictModel):
             'cex_ratio': float(self.cex_ratio),
             'trigger_mode': self.trigger_mode.value,
             'trigger_pct': float(self.trigger_pct),
+            'trigger_units': int(self.trigger_units),
             'mongo_uri': self.mongo_uri,
             'mongo_db': self.mongo_db,
             'mongo_collection': self.mongo_collection,
@@ -179,7 +181,7 @@ class HedgerStats(StrictModel):
             calc=calc,
             uniswap=uniswap,
             live=live,
-            finished_at_ms=None if data.get('finished_at_ms') is None else int(data.get('finished_at_ms')),
+            finished_at_ms=None if data['finished_at_ms'] is None else int(data['finished_at_ms']),
             error=None if data['error'] is None else str(data['error']),
         )
     

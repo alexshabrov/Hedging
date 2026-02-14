@@ -1,16 +1,20 @@
 """
 Frontend domain service
 Date: 2026-02-13
-Version: 2.0
+Version: 3.0
 """
+import time, uuid
 from typing import List
 
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
+from backend.models.hedger_models import HedgerConfig, CexTriggerMode
 from frontend.modules.models.frontend_models import (
+    FrontendCreateTemplateForm,
     FrontendActivePositionDoc,
     FrontendArchivePositionDoc,
     FrontendDashboardView,
+    FrontendDexNetworkConfig,
     FrontendIterationDetailsView,
     FrontendIterationDoc,
     FrontendIterationRow,
@@ -18,34 +22,113 @@ from frontend.modules.models.frontend_models import (
     FrontendIterationHedgeChaseRow,
     FrontendIterationLpBlock,
     FrontendIterationRebalanceBlock,
-    FrontendStartRunForm,
+    FrontendRuntimeConfig,
+    FrontendStartFromTemplateForm,
     FrontendPositionRow,
+    FrontendRunTemplateDoc,
     FrontendRunDetailsView,
+    frontend_dex_network_configs_from_params,
 )
 from frontend.modules.services.backend_api_service import BackendApiService
 from frontend.modules.services.storage_service import StorageService
 
 
 class FrontendService:
-    def __init__(self, storage: StorageService, backend_api: BackendApiService):
+    def __init__(self, storage: StorageService, backend_api: BackendApiService, runtime_config: FrontendRuntimeConfig):
         if storage is None:
             raise RuntimeError('FrontendService: storage is None')
         if backend_api is None:
             raise RuntimeError('FrontendService: backend_api is None')
+        if runtime_config is None:
+            raise RuntimeError('FrontendService: runtime_config is None')
+        if not isinstance(runtime_config, FrontendRuntimeConfig):
+            raise RuntimeError(f'FrontendService: runtime_config is not FrontendRuntimeConfig: {type(runtime_config)}')
 
         self._storage = storage
         self._backend_api = backend_api
+        self._runtime = runtime_config
         self._logger = get_logger('frontend_service')
+        self._network_configs = frontend_dex_network_configs_from_params()
+        if len(self._network_configs) == 0:
+            raise RuntimeError('FrontendService: network configs are empty')
 
-    def start_run(self, form: FrontendStartRunForm) -> str:
+    def list_run_templates(self) -> List[FrontendRunTemplateDoc]:
+        return self._storage.list_run_templates()
+
+    def list_network_configs(self) -> List[FrontendDexNetworkConfig]:
+        return self._network_configs
+
+    def create_run_template(self, form: FrontendCreateTemplateForm) -> FrontendRunTemplateDoc:
         if form is None:
-            raise RuntimeError('FrontendService.start_run: form is None')
-        if not isinstance(form, FrontendStartRunForm):
-            raise RuntimeError(f'FrontendService.start_run: form is not FrontendStartRunForm: {type(form)}')
+            raise RuntimeError('FrontendService.create_run_template: form is None')
+        if not isinstance(form, FrontendCreateTemplateForm):
+            raise RuntimeError(f'FrontendService.create_run_template: form is not FrontendCreateTemplateForm: {type(form)}')
 
-        req = form.to_start_request()
+        self._validate_template_form(form)
+
+        now_ms = int(time.time() * 1000)
+        template = FrontendRunTemplateDoc(
+            template_id=str(uuid.uuid4().hex),
+            network=str(form.network),
+            symbol=str(form.symbol),
+            pool_address=str(form.pool_address),
+            fee_pct=float(form.fee_pct),
+            cex_ratio=float(form.cex_ratio),
+            trigger_mode=form.trigger_mode,
+            trigger_pct=float(form.trigger_pct),
+            trigger_units=int(form.trigger_units),
+            created_at_ms=int(now_ms),
+            updated_at_ms=int(now_ms),
+        )
+        self._storage.create_run_template(template)
+        self._logger.info(f'frontend_create_template_ok template_id={template.template_id}')
+        return template
+
+    def start_run_from_template(self, form: FrontendStartFromTemplateForm) -> str:
+        if form is None:
+            raise RuntimeError('FrontendService.start_run_from_template: form is None')
+        if not isinstance(form, FrontendStartFromTemplateForm):
+            raise RuntimeError(f'FrontendService.start_run_from_template: form is not FrontendStartFromTemplateForm: {type(form)}')
+        if float(form.total_quote) <= 0.0:
+            raise RuntimeError('FrontendService.start_run_from_template: total_quote must be > 0')
+        if float(form.price_lower_pct) <= 0.0:
+            raise RuntimeError('FrontendService.start_run_from_template: price_lower_pct must be > 0')
+        if float(form.price_upper_pct) <= 0.0:
+            raise RuntimeError('FrontendService.start_run_from_template: price_upper_pct must be > 0')
+
+        template = self._storage.find_run_template(str(form.template_id))
+        rpc_url = self._build_rpc_url_for_network(str(template.network))
+
+        req = BackendStartRunRequest(
+            config=HedgerConfig(
+                symbol=str(template.symbol),
+                rpc_url=str(rpc_url),
+                network=str(template.network),
+                pool_address=str(template.pool_address),
+                fee_pct=float(template.fee_pct),
+                price_lower=None,
+                price_upper=None,
+                price_lower_pct=float(form.price_lower_pct),
+                price_upper_pct=float(form.price_upper_pct),
+                total_quote=float(form.total_quote),
+                cex_ratio=float(template.cex_ratio),
+                trigger_mode=template.trigger_mode,
+                trigger_pct=float(template.trigger_pct),
+                trigger_units=int(template.trigger_units),
+                mongo_uri=str(self._runtime.mongo_uri),
+                mongo_db=str(self._runtime.mongo_db),
+                mongo_collection=str(self._runtime.mongo_collection),
+                tick_ms=int(self._runtime.tick_ms),
+                gtx_cooldown_ms=int(self._runtime.gtx_cooldown_ms),
+                entrance_timeout_ms=int(self._runtime.entrance_timeout_ms),
+                cowswap_api_timeout_sec=int(self._runtime.cowswap_api_timeout_sec),
+                cowswap_wait_timeout_sec=int(self._runtime.cowswap_wait_timeout_sec),
+                cowswap_poll_interval_sec=int(self._runtime.cowswap_poll_interval_sec),
+            )
+        )
+
         run_id = self._backend_api.start_run(req)
-        self._logger.info(f'frontend_start_run_ok run_id={run_id}')
+        self._logger.info(f'frontend_start_run_from_template_ok run_id={run_id} template_id={template.template_id}')
         return run_id
 
     def start_run_request(self, req: BackendStartRunRequest) -> str:
@@ -446,3 +529,55 @@ class FrontendService:
 
         seconds_per_year = 365.0 * 24.0 * 60.0 * 60.0
         return (float(pnl_quote) / float(total_quote)) * (float(seconds_per_year) / float(hold_sec)) * 100.0
+
+    def _validate_template_form(self, form: FrontendCreateTemplateForm) -> None:
+        if len(str(form.network)) == 0:
+            raise RuntimeError('FrontendService._validate_template_form: network is empty')
+        if len(str(form.symbol)) == 0:
+            raise RuntimeError('FrontendService._validate_template_form: symbol is empty')
+        if len(str(form.pool_address)) == 0:
+            raise RuntimeError('FrontendService._validate_template_form: pool_address is empty')
+        if float(form.fee_pct) <= 0.0:
+            raise RuntimeError('FrontendService._validate_template_form: fee_pct must be > 0')
+        if float(form.cex_ratio) <= 0.0:
+            raise RuntimeError('FrontendService._validate_template_form: cex_ratio must be > 0')
+        if float(form.cex_ratio) > 1.0:
+            raise RuntimeError('FrontendService._validate_template_form: cex_ratio must be <= 1')
+
+        if form.trigger_mode == CexTriggerMode.PCT:
+            if float(form.trigger_pct) <= 0.0:
+                raise RuntimeError('FrontendService._validate_template_form: trigger_pct must be > 0 for pct mode')
+            if int(form.trigger_units) != 0:
+                raise RuntimeError('FrontendService._validate_template_form: trigger_units must be 0 for pct mode')
+        elif form.trigger_mode == CexTriggerMode.UNITS:
+            if int(form.trigger_units) <= 0:
+                raise RuntimeError('FrontendService._validate_template_form: trigger_units must be > 0 for units mode')
+            if float(form.trigger_pct) != 0.0:
+                raise RuntimeError('FrontendService._validate_template_form: trigger_pct must be 0 for units mode')
+        else:
+            raise RuntimeError(f'FrontendService._validate_template_form: unsupported trigger_mode: {form.trigger_mode}')
+
+    def _build_rpc_url_for_network(self, network: str) -> str:
+        if not isinstance(network, str) or len(network) == 0:
+            raise RuntimeError('FrontendService._build_rpc_url_for_network: network is empty')
+
+        network_config = None
+        for item in self._network_configs:
+            if str(item.key) == str(network):
+                network_config = item
+                break
+
+        if network_config is None:
+            raise RuntimeError(f'FrontendService._build_rpc_url_for_network: network not found: {network}')
+
+        rpc_url_template = str(network_config.rpc_url_template)
+        if len(rpc_url_template) == 0:
+            raise RuntimeError(f'FrontendService._build_rpc_url_for_network: rpc_url_template is empty for network={network}')
+        if '{RPC_KEY}' not in rpc_url_template:
+            raise RuntimeError(f'FrontendService._build_rpc_url_for_network: rpc_url_template does not contain {{RPC_KEY}} for network={network}')
+
+        rpc_key = str(self._runtime.rpc_key)
+        if len(rpc_key) == 0:
+            raise RuntimeError('FrontendService._build_rpc_url_for_network: rpc_key is empty')
+
+        return str(rpc_url_template).replace('{RPC_KEY}', str(rpc_key))

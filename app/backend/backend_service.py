@@ -6,9 +6,11 @@ Version: 1.0
 from flask import Flask
 
 from backend.modules.backend_class import Backend
+from backend.modules.backend_env import check_required_env
 
 
 ### Flask ###
+check_required_env()
 app = Flask(__name__)
 backend = Backend(app)
 

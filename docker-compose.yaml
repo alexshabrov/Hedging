@@ -6,6 +6,17 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      - FRONT_BACKEND_URL=${FRONT_BACKEND_URL:-http://127.0.0.1:8080}
+      - MONGO_URI=${MONGO_URI:-mongodb://hedging_mongo:27017}
+      - MONGO_DB=${MONGO_DB:-hedging}
+      - MONGO_COLLECTION=${MONGO_COLLECTION:-hedge_runs}
+      - TICK_MS=${TICK_MS:-5}
+      - GTX_COOLDOWN_MS=${GTX_COOLDOWN_MS:-5}
+      - ENTRANCE_TIMEOUT_MS=${ENTRANCE_TIMEOUT_MS:-60000}
+      - COWSWAP_API_TIMEOUT_SEC=${COWSWAP_API_TIMEOUT_SEC:-10}
+      - COWSWAP_WAIT_TIMEOUT_SEC=${COWSWAP_WAIT_TIMEOUT_SEC:-300}
+      - COWSWAP_POLL_INTERVAL_SEC=${COWSWAP_POLL_INTERVAL_SEC:-3}
     ########
     networks:
       - nginx-common

@@ -1,7 +1,22 @@
-# https://jupyter.hedgingbt.mimir.name/?token=f477694869ffe3f4254db0a4823eea25428e83cdc6ef3ee21367df5bc3e831ee
-TOKEN='f477694869ffe3f4254db0a4823eea25428e83cdc6ef3ee21367df5bc3e831ee'
+set -e
+
+required_env=(
+  "BINANCE_KEY"
+  "BINANCE_SECRET"
+  "PRIVATE_KEY"
+  "FRONT_SECRET_KEY"
+  "FRONT_ADMIN_PASSWORD"
+  "RPC_KEY"
+)
+
+for env_name in "${required_env[@]}"; do
+  if [[ -z "${!env_name:-}" ]]; then
+    echo "[run.sh] missing required env: ${env_name}" >&2
+    exit 1
+  fi
+done
 
 while true; do
-    python -m jupyter notebook --allow-root --ip=0.0.0.0 --port=8888 --notebook-dir=/hedging --NotebookApp.token=$TOKEN --NotebookApp.password=$TOKEN
-    sleep 1
+  python run.py
+  sleep 1
 done

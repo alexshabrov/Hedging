@@ -15,119 +15,144 @@
         </div>
 
         <div class="row">
-            <div class="col-sm-12">
+            <div class="col-sm-12 col-lg-6">
                 <div class="card">
-                    <div class="card-header">Start run</div>
+                    <div class="card-header">Create run template</div>
                     <div class="card-body">
                         <form method="POST" action="/runs/start">
+                            <input type="hidden" name="action" value="create_template">
+
                             <div class="form-row">
                                 <div class="form-group col-md-3">
-                                    <label>symbol</label>
-                                    <input class="form-control" name="symbol" value="{{ qarg('symbol') or 'ETHUSDC' }}" required>
+                                    <label>network</label>
+                                    <select class="form-control" name="network" required>
+                                        {% for item in networks %}
+                                            <option value="{{ item.key }}">{{ item.key }}</option>
+                                        {% endfor %}
+                                    </select>
                                 </div>
                                 <div class="form-group col-md-3">
-                                    <label>network</label>
-                                    <input class="form-control" name="network" value="{{ qarg('network') or 'mainnet' }}" required>
+                                    <label>symbol</label>
+                                    <input class="form-control" name="symbol" value="ETHUSDC" required>
                                 </div>
-                                <div class="form-group col-md-6">
-                                    <label>rpc_url</label>
-                                    <input class="form-control" name="rpc_url" value="{{ qarg('rpc_url') }}" required>
+                                <div class="form-group col-md-4">
+                                    <label>pool_address</label>
+                                    <input class="form-control" name="pool_address" required>
+                                </div>
+                                <div class="form-group col-md-2">
+                                    <label>fee_pct</label>
+                                    <input class="form-control" name="fee_pct" value="0.05" required>
+                                </div>
+                                <div class="form-group col-md-2">
+                                    <label>cex_ratio</label>
+                                    <input class="form-control" name="cex_ratio" value="0.255" required>
                                 </div>
                             </div>
 
                             <div class="form-row">
                                 <div class="form-group col-md-4">
-                                    <label>pool_address</label>
-                                    <input class="form-control" name="pool_address" value="{{ qarg('pool_address') }}" required>
+                                    <label>trigger_mode</label>
+                                    <select class="form-control" name="trigger_mode">
+                                        <option value="pct">pct</option>
+                                        <option value="units">units</option>
+                                    </select>
                                 </div>
-                                <div class="form-group col-md-2">
-                                    <label>fee_pct</label>
-                                    <input class="form-control" name="fee_pct" value="{{ qarg('fee_pct') or '0.3' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>total_quote</label>
-                                    <input class="form-control" name="total_quote" value="{{ qarg('total_quote') or '1000' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>cex_ratio</label>
-                                    <input class="form-control" name="cex_ratio" value="{{ qarg('cex_ratio') or '0.5' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
+                                <div class="form-group col-md-4">
                                     <label>trigger_pct</label>
-                                    <input class="form-control" name="trigger_pct" value="{{ qarg('trigger_pct') or '0.05' }}" required>
+                                    <input class="form-control" name="trigger_pct" value="0.05" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>trigger_units</label>
+                                    <input class="form-control" name="trigger_units" value="0" required>
                                 </div>
                             </div>
 
+                            <button type="submit" class="btn btn-primary">Create template</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-sm-12 col-lg-6">
+                <div class="card">
+                    <div class="card-header">Start run from template</div>
+                    <div class="card-body">
+                        <form method="POST" action="/runs/start">
+                            <input type="hidden" name="action" value="start_from_template">
+
                             <div class="form-row">
-                                <div class="form-group col-md-2">
-                                    <label>price_lower</label>
-                                    <input class="form-control" name="price_lower" value="{{ qarg('price_lower') }}">
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>price_upper</label>
-                                    <input class="form-control" name="price_upper" value="{{ qarg('price_upper') }}">
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>price_lower_pct</label>
-                                    <input class="form-control" name="price_lower_pct" value="{{ qarg('price_lower_pct') }}">
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>price_upper_pct</label>
-                                    <input class="form-control" name="price_upper_pct" value="{{ qarg('price_upper_pct') }}">
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>trigger_mode</label>
-                                    <select class="form-control" name="trigger_mode">
-                                        <option value="small_pct">small_pct</option>
-                                        <option value="one_tick">one_tick</option>
+                                <div class="form-group col-md-12">
+                                    <label>template_id</label>
+                                    <select class="form-control" name="template_id" required>
+                                        {% for item in templates %}
+                                            <option value="{{ item.template_id }}">
+                                                {{ item.template_id }} | {{ item.network }} | {{ item.symbol }} | {{ item.pool_address }}
+                                            </option>
+                                        {% endfor %}
                                     </select>
                                 </div>
                             </div>
 
                             <div class="form-row">
                                 <div class="form-group col-md-4">
-                                    <label>mongo_uri</label>
-                                    <input class="form-control" name="mongo_uri" value="{{ qarg('mongo_uri') or 'mongodb://hedging_mongo:27017' }}" required>
+                                    <label>total_quote</label>
+                                    <input class="form-control" name="total_quote" value="1000" required>
                                 </div>
-                                <div class="form-group col-md-2">
-                                    <label>mongo_db</label>
-                                    <input class="form-control" name="mongo_db" value="{{ qarg('mongo_db') or 'hedging' }}" required>
+                                <div class="form-group col-md-4">
+                                    <label>price_lower_pct</label>
+                                    <input class="form-control" name="price_lower_pct" value="5" required>
                                 </div>
-                                <div class="form-group col-md-3">
-                                    <label>mongo_collection</label>
-                                    <input class="form-control" name="mongo_collection" value="{{ qarg('mongo_collection') or 'hedge_runs' }}" required>
+                                <div class="form-group col-md-4">
+                                    <label>price_upper_pct</label>
+                                    <input class="form-control" name="price_upper_pct" value="5" required>
                                 </div>
                             </div>
 
-                            <div class="form-row">
-                                <div class="form-group col-md-2">
-                                    <label>tick_ms</label>
-                                    <input class="form-control" name="tick_ms" value="{{ qarg('tick_ms') or '5' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>gtx_cooldown_ms</label>
-                                    <input class="form-control" name="gtx_cooldown_ms" value="{{ qarg('gtx_cooldown_ms') or '5' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>entrance_timeout_ms</label>
-                                    <input class="form-control" name="entrance_timeout_ms" value="{{ qarg('entrance_timeout_ms') or '60000' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>cowswap_api_timeout_sec</label>
-                                    <input class="form-control" name="cowswap_api_timeout_sec" value="{{ qarg('cowswap_api_timeout_sec') or '10' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>cowswap_wait_timeout_sec</label>
-                                    <input class="form-control" name="cowswap_wait_timeout_sec" value="{{ qarg('cowswap_wait_timeout_sec') or '300' }}" required>
-                                </div>
-                                <div class="form-group col-md-2">
-                                    <label>cowswap_poll_interval_sec</label>
-                                    <input class="form-control" name="cowswap_poll_interval_sec" value="{{ qarg('cowswap_poll_interval_sec') or '3' }}" required>
-                                </div>
-                            </div>
                             <button type="submit" class="btn btn-primary">Start</button>
                             <a href="/positions" class="btn btn-secondary">Cancel</a>
                         </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Templates</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-striped mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>template_id</th>
+                                        <th>network</th>
+                                        <th>symbol</th>
+                                        <th>pool_address</th>
+                                        <th>fee_pct</th>
+                                        <th>cex_ratio</th>
+                                        <th>trigger_mode</th>
+                                        <th>trigger_pct</th>
+                                        <th>trigger_units</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in templates %}
+                                        <tr>
+                                            <td>{{ item.template_id }}</td>
+                                            <td>{{ item.network }}</td>
+                                            <td>{{ item.symbol }}</td>
+                                            <td>{{ item.pool_address }}</td>
+                                            <td>{{ item.fee_pct }}</td>
+                                            <td>{{ item.cex_ratio }}</td>
+                                            <td>{{ item.trigger_mode }}</td>
+                                            <td>{{ item.trigger_pct }}</td>
+                                            <td>{{ item.trigger_units }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>

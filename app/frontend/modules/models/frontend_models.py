@@ -13,6 +13,7 @@ from backend.models.backend_models import (
     BackendStartRunRequest,
 )
 from backend.models.hedger_models import CexTriggerMode, HedgerConfig
+from dex.contract.params import Params
 
 
 def frontend_position_view_from_dict(data: dict) -> BackendPositionView:
@@ -121,20 +122,38 @@ class FrontendBackendPositionsResponse(StrictModel):
         return row
 
 
-class FrontendStartRunForm(StrictModel):
-    symbol: str
-    rpc_url: str
-    network: str
-    pool_address: str
-    fee_pct: float
-    price_lower: Optional[float]
-    price_upper: Optional[float]
-    price_lower_pct: Optional[float]
-    price_upper_pct: Optional[float]
-    total_quote: float
-    cex_ratio: float
-    trigger_mode: CexTriggerMode
-    trigger_pct: float
+class FrontendDexNetworkConfig(StrictModel):
+    key: str
+    rpc_url_template: str
+    stables: List[str]
+    npm: str
+
+
+def frontend_dex_network_configs_from_params() -> List['FrontendDexNetworkConfig']:
+    networks = Params.NETWORKS
+    out = []
+
+    for network_key in networks:
+        network_data = networks[network_key]
+
+        stables = []
+        for stable in network_data['stables']:
+            stables.append(str(stable))
+
+        out.append(
+            FrontendDexNetworkConfig(
+                key=str(network_key),
+                rpc_url_template=str(network_data['rpc_url_template']),
+                stables=stables,
+                npm=str(network_data['npm']),
+            )
+        )
+
+    return out
+
+
+class FrontendRuntimeConfig(StrictModel):
+    rpc_key: str
     mongo_uri: str
     mongo_db: str
     mongo_collection: str
@@ -145,33 +164,53 @@ class FrontendStartRunForm(StrictModel):
     cowswap_wait_timeout_sec: int
     cowswap_poll_interval_sec: int
 
-    def to_start_request(self) -> BackendStartRunRequest:
-        return BackendStartRunRequest(
-            config=HedgerConfig(
-                symbol=self.symbol,
-                rpc_url=self.rpc_url,
-                network=self.network,
-                pool_address=self.pool_address,
-                fee_pct=self.fee_pct,
-                price_lower=self.price_lower,
-                price_upper=self.price_upper,
-                price_lower_pct=self.price_lower_pct,
-                price_upper_pct=self.price_upper_pct,
-                total_quote=self.total_quote,
-                cex_ratio=self.cex_ratio,
-                trigger_mode=self.trigger_mode,
-                trigger_pct=self.trigger_pct,
-                mongo_uri=self.mongo_uri,
-                mongo_db=self.mongo_db,
-                mongo_collection=self.mongo_collection,
-                tick_ms=self.tick_ms,
-                gtx_cooldown_ms=self.gtx_cooldown_ms,
-                entrance_timeout_ms=self.entrance_timeout_ms,
-                cowswap_api_timeout_sec=self.cowswap_api_timeout_sec,
-                cowswap_wait_timeout_sec=self.cowswap_wait_timeout_sec,
-                cowswap_poll_interval_sec=self.cowswap_poll_interval_sec,
-            )
+
+class FrontendRunTemplateDoc(StrictModel):
+    template_id: str
+    network: str
+    symbol: str
+    pool_address: str
+    fee_pct: float
+    cex_ratio: float
+    trigger_mode: CexTriggerMode
+    trigger_pct: float
+    trigger_units: int
+    created_at_ms: int
+    updated_at_ms: int
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'FrontendRunTemplateDoc':
+        return cls(
+            template_id=str(data['template_id']),
+            network=str(data['network']),
+            symbol=str(data['symbol']),
+            pool_address=str(data['pool_address']),
+            fee_pct=float(data['fee_pct']),
+            cex_ratio=float(data['cex_ratio']),
+            trigger_mode=CexTriggerMode(str(data['trigger_mode'])),
+            trigger_pct=float(data['trigger_pct']),
+            trigger_units=int(data['trigger_units']),
+            created_at_ms=int(data['created_at_ms']),
+            updated_at_ms=int(data['updated_at_ms']),
         )
+
+
+class FrontendCreateTemplateForm(StrictModel):
+    network: str
+    symbol: str
+    pool_address: str
+    fee_pct: float
+    cex_ratio: float
+    trigger_mode: CexTriggerMode
+    trigger_pct: float
+    trigger_units: int
+
+
+class FrontendStartFromTemplateForm(StrictModel):
+    template_id: str
+    total_quote: float
+    price_lower_pct: float
+    price_upper_pct: float
 
 
 ### Storage models ###

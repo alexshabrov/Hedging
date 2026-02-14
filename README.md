@@ -566,8 +566,16 @@ python app/backend/backend_service.py
 export FRONT_SECRET_KEY="..."
 export FRONT_ADMIN_PASSWORD="..."
 export FRONT_BACKEND_URL="http://hedging:8080"
-export FRONT_MONGO_URI="mongodb://hedging_mongo:27017"
-export FRONT_MONGO_DB="hedging"
+export RPC_KEY="..."
+export MONGO_URI="mongodb://hedging_mongo:27017"
+export MONGO_DB="hedging"
+export MONGO_COLLECTION="hedge_runs"
+export TICK_MS="5"
+export GTX_COOLDOWN_MS="5"
+export ENTRANCE_TIMEOUT_MS="60000"
+export COWSWAP_API_TIMEOUT_SEC="10"
+export COWSWAP_WAIT_TIMEOUT_SEC="300"
+export COWSWAP_POLL_INTERVAL_SEC="3"
 
 python app/frontend/app.py
 ```

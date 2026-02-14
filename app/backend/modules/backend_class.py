@@ -3,7 +3,7 @@ Backend service module
 Date: 2026-02-13
 Version: 1.1
 """
-import os, sys, time, threading, uuid
+import sys, time, threading, uuid
 from typing import Dict, List, Optional, Tuple
 import orjson
 
@@ -22,6 +22,7 @@ from backend.models.backend_models import (
 )
 from backend.modules.hedger_class import Hedger
 from backend.modules.hedger_helper import calc_hedger_pnl_stats
+from backend.modules.backend_env import read_runtime_secrets
 
 
 ### Collections ###
@@ -76,30 +77,13 @@ class Backend:
         self._logger.info('backend_ready')
 
     def _read_secrets(self) -> Tuple[str, str, str, Optional[str]]:
-        if 'BINANCE_KEY' not in os.environ:
-            raise RuntimeError('Backend: BINANCE_KEY not found in environment variables')
-        if 'BINANCE_SECRET' not in os.environ:
-            raise RuntimeError('Backend: BINANCE_SECRET not found in environment variables')
-        if 'PRIVATE_KEY' not in os.environ:
-            raise RuntimeError('Backend: PRIVATE_KEY not found in environment variables')
-
-        binance_key = str(os.environ['BINANCE_KEY'])
-        binance_secret = str(os.environ['BINANCE_SECRET'])
-        private_key = str(os.environ['PRIVATE_KEY'])
-        wallet_address = None
-        if 'WALLET_ADDRESS' in os.environ:
-            wallet_address = str(os.environ['WALLET_ADDRESS'])
-
-        if len(binance_key) == 0:
-            raise RuntimeError('Backend: BINANCE_KEY is empty')
-        if len(binance_secret) == 0:
-            raise RuntimeError('Backend: BINANCE_SECRET is empty')
-        if len(private_key) == 0:
-            raise RuntimeError('Backend: PRIVATE_KEY is empty')
-        if wallet_address is not None and len(wallet_address) == 0:
-            raise RuntimeError('Backend: WALLET_ADDRESS is empty')
-
-        return binance_key, binance_secret, private_key, wallet_address
+        binance_key, binance_secret, private_key, wallet_address = read_runtime_secrets()
+        return (
+            str(binance_key),
+            str(binance_secret),
+            str(private_key),
+            None if wallet_address is None else str(wallet_address),
+        )
 
     def _register_routes(self) -> None:
         @self._app.route('/api/health', methods=['GET'])

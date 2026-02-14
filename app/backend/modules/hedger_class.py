@@ -272,25 +272,33 @@ class Hedger:
             self._logger.info(f'hedger_quote total_quote={self.config.total_quote} cex_ratio={self.config.cex_ratio} hedge_quote={hedge_quote}')
             
             trigger_mode = self.config.trigger_mode
-            if trigger_mode == CexTriggerMode.ONE_TICK:
+            if trigger_mode == CexTriggerMode.UNITS:
+                trigger_units = int(self.config.trigger_units)
+                if int(trigger_units) <= 0:
+                    raise RuntimeError('Hedger: trigger_units must be > 0 for units mode')
+
                 price_step = float(self._rule.price_step)
                 if float(price_step) <= 0:
-                    raise RuntimeError(f'Hedger: bad price_step for one_tick mode: {self._rule.price_step}')
-                
-                trigger_offset_pct_x10000 = int(round((float(price_step) / float(price_now)) * 1_000_000.0))
+                    raise RuntimeError(f'Hedger: bad price_step for units mode: {self._rule.price_step}')
+
+                trigger_delta = float(price_step) * float(trigger_units)
+                if float(trigger_delta) <= 0:
+                    raise RuntimeError('Hedger: trigger_delta must be > 0 for units mode')
+
+                trigger_offset_pct_x10000 = int(round((float(trigger_delta) / float(price_now)) * 1_000_000.0))
                 if int(trigger_offset_pct_x10000) <= 0:
-                    raise RuntimeError('Hedger: one_tick produced non-positive trigger_offset_pct_x10000')
-            elif trigger_mode == CexTriggerMode.SMALL_PCT:
+                    raise RuntimeError('Hedger: units mode produced non-positive trigger_offset_pct_x10000')
+            elif trigger_mode == CexTriggerMode.PCT:
                 trigger_offset_pct_x10000 = int(round(float(self.config.trigger_pct) * 10_000.0))
                 if int(trigger_offset_pct_x10000) <= 0:
-                    raise RuntimeError('Hedger: small_pct produced non-positive trigger_offset_pct_x10000')
+                    raise RuntimeError('Hedger: pct mode produced non-positive trigger_offset_pct_x10000')
             else:
                 raise RuntimeError(f'Hedger: unsupported trigger_mode: {trigger_mode}')
             
             if int(trigger_offset_pct_x10000) >= int(target_offset_pct_x10000):
                 raise RuntimeError(f'Hedger: trigger_offset_pct_x10000 must be < target_offset_pct_x10000, got trigger={trigger_offset_pct_x10000} target={target_offset_pct_x10000}')
             
-            self._logger.info(f'hedger_trigger trigger_mode={trigger_mode.value} trigger_pct={self.config.trigger_pct} trigger_offset_pct_x10000={trigger_offset_pct_x10000} target_offset_pct_x10000={target_offset_pct_x10000}')
+            self._logger.info(f'hedger_trigger trigger_mode={trigger_mode.value} trigger_pct={self.config.trigger_pct} trigger_units={self.config.trigger_units} trigger_offset_pct_x10000={trigger_offset_pct_x10000} target_offset_pct_x10000={target_offset_pct_x10000}')
             
             self._run_calc_stats = HedgeCalcStats(
                 base_price=float(price_now),
@@ -594,12 +602,16 @@ class Hedger:
             raise RuntimeError('HedgerConfig.cex_ratio must be > 0')
         if not isinstance(cfg.trigger_mode, CexTriggerMode):
             raise RuntimeError(f'HedgerConfig.trigger_mode is not CexTriggerMode: {type(cfg.trigger_mode)}')
-        if cfg.trigger_mode == CexTriggerMode.SMALL_PCT:
+        if cfg.trigger_mode == CexTriggerMode.PCT:
             if float(cfg.trigger_pct) <= 0:
-                raise RuntimeError('HedgerConfig.trigger_pct must be > 0 for small_pct mode')
-        elif cfg.trigger_mode == CexTriggerMode.ONE_TICK:
-            if float(cfg.trigger_pct) <= 0:
-                raise RuntimeError('HedgerConfig.trigger_pct must be > 0')
+                raise RuntimeError('HedgerConfig.trigger_pct must be > 0 for pct mode')
+            if int(cfg.trigger_units) != 0:
+                raise RuntimeError('HedgerConfig.trigger_units must be 0 for pct mode')
+        elif cfg.trigger_mode == CexTriggerMode.UNITS:
+            if int(cfg.trigger_units) <= 0:
+                raise RuntimeError('HedgerConfig.trigger_units must be > 0 for units mode')
+            if float(cfg.trigger_pct) != 0.0:
+                raise RuntimeError('HedgerConfig.trigger_pct must be 0 for units mode')
         else:
             raise RuntimeError(f'HedgerConfig.trigger_mode is unsupported: {cfg.trigger_mode}')
         if not isinstance(cfg.mongo_uri, str) or len(cfg.mongo_uri) == 0:

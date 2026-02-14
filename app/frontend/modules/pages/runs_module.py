@@ -1,16 +1,15 @@
 """
 Runs frontend module
 Date: 2026-02-13
-Version: 2.0
+Version: 3.0
 """
 import sys
-from typing import Optional
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 
 from backend.models.hedger_models import CexTriggerMode
 from frontend.modules.auth import login_required
-from frontend.modules.models.frontend_models import FrontendStartRunForm
+from frontend.modules.models.frontend_models import FrontendCreateTemplateForm, FrontendStartFromTemplateForm
 from frontend.modules.services.frontend_service import FrontendService
 
 
@@ -31,15 +30,41 @@ class RunsModule:
         def runs_start_page():
             if request.method == 'POST':
                 try:
-                    form = self._read_start_form()
-                    run_id = self._service.start_run(form)
-                    flash(f'Run started: {run_id}')
-                    return redirect(url_for('run_details_page', run_id=run_id))
+                    action = self._read_str('action')
+
+                    if str(action) == 'create_template':
+                        form = self._read_template_form()
+                        template = self._service.create_run_template(form)
+                        flash(f'Template created: {template.template_id}')
+                        return redirect(url_for('runs_start_page'))
+
+                    if str(action) == 'start_from_template':
+                        form = self._read_start_from_template_form()
+                        run_id = self._service.start_run_from_template(form)
+                        flash(f'Run started: {run_id}')
+                        return redirect(url_for('run_details_page', run_id=run_id))
+
+                    raise RuntimeError(f'RunsModule.runs_start_page: unsupported action: {action}')
                 except Exception:
                     _t, exc, _tb = sys.exc_info()
                     flash(str(exc))
 
-            return render_template('modules/start_run.html', title='Start run')
+            templates = self._service.list_run_templates()
+            template_items = []
+            for item in templates:
+                template_items.append(item.model_dump())
+
+            networks = self._service.list_network_configs()
+            network_items = []
+            for item in networks:
+                network_items.append(item.model_dump())
+
+            return render_template(
+                'modules/start_run.html',
+                title='Run templates',
+                templates=template_items,
+                networks=network_items,
+            )
 
         @app.route('/runs/<run_id>', methods=['GET'])
         @login_required
@@ -64,30 +89,24 @@ class RunsModule:
             view = self._service.get_iteration_details(str(iteration_id))
             return render_template('modules/iteration_details.html', title='Iteration details', details=view.model_dump())
 
-    def _read_start_form(self) -> FrontendStartRunForm:
-        return FrontendStartRunForm(
-            symbol=self._read_str('symbol'),
-            rpc_url=self._read_str('rpc_url'),
+    def _read_template_form(self) -> FrontendCreateTemplateForm:
+        return FrontendCreateTemplateForm(
             network=self._read_str('network'),
+            symbol=self._read_str('symbol'),
             pool_address=self._read_str('pool_address'),
             fee_pct=self._read_float('fee_pct'),
-            price_lower=self._read_optional_float('price_lower'),
-            price_upper=self._read_optional_float('price_upper'),
-            price_lower_pct=self._read_optional_float('price_lower_pct'),
-            price_upper_pct=self._read_optional_float('price_upper_pct'),
-            total_quote=self._read_float('total_quote'),
             cex_ratio=self._read_float('cex_ratio'),
             trigger_mode=CexTriggerMode(self._read_str('trigger_mode')),
             trigger_pct=self._read_float('trigger_pct'),
-            mongo_uri=self._read_str('mongo_uri'),
-            mongo_db=self._read_str('mongo_db'),
-            mongo_collection=self._read_str('mongo_collection'),
-            tick_ms=self._read_int('tick_ms'),
-            gtx_cooldown_ms=self._read_int('gtx_cooldown_ms'),
-            entrance_timeout_ms=self._read_int('entrance_timeout_ms'),
-            cowswap_api_timeout_sec=self._read_int('cowswap_api_timeout_sec'),
-            cowswap_wait_timeout_sec=self._read_int('cowswap_wait_timeout_sec'),
-            cowswap_poll_interval_sec=self._read_int('cowswap_poll_interval_sec'),
+            trigger_units=self._read_int('trigger_units'),
+        )
+
+    def _read_start_from_template_form(self) -> FrontendStartFromTemplateForm:
+        return FrontendStartFromTemplateForm(
+            template_id=self._read_str('template_id'),
+            total_quote=self._read_float('total_quote'),
+            price_lower_pct=self._read_float('price_lower_pct'),
+            price_upper_pct=self._read_float('price_upper_pct'),
         )
 
     def _read_str(self, key: str) -> str:
@@ -103,11 +122,3 @@ class RunsModule:
 
     def _read_int(self, key: str) -> int:
         return int(self._read_str(key))
-
-    def _read_optional_float(self, key: str) -> Optional[float]:
-        if key not in request.form:
-            raise RuntimeError(f'RunsModule._read_optional_float: {key} is missing in form')
-        raw = str(request.form[key]).strip()
-        if len(raw) == 0:
-            return None
-        return float(raw)

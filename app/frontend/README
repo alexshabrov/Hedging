@@ -23,13 +23,21 @@ Version: 1.0
 
 - `FRONT_SECRET_KEY`
 - `FRONT_ADMIN_PASSWORD`
+- `RPC_KEY`
+- `TICK_MS`
+- `GTX_COOLDOWN_MS`
+- `ENTRANCE_TIMEOUT_MS`
+- `COWSWAP_API_TIMEOUT_SEC`
+- `COWSWAP_WAIT_TIMEOUT_SEC`
+- `COWSWAP_POLL_INTERVAL_SEC`
 
 Опционально:
 
 - `FRONT_SESSION_COOKIE_DOMAIN`
 - `FRONT_BACKEND_URL` (по умолчанию: `http://127.0.0.1:8080`)
-- `FRONT_MONGO_URI` (по умолчанию: `mongodb://hedging_mongo:27017`)
-- `FRONT_MONGO_DB` (по умолчанию: `hedging`)
+- `MONGO_URI` (по умолчанию: `mongodb://hedging_mongo:27017`)
+- `MONGO_DB` (по умолчанию: `hedging`)
+- `MONGO_COLLECTION` (по умолчанию: `hedge_runs`)
 
 ==================================================
 3) Запуск
@@ -52,7 +60,7 @@ python app/frontend/app.py
 
 - `/dashboard` — системные агрегаты
 - `/positions` — уровень запусков (active + archive)
-- `/runs/start` — запуск нового цикла
+- `/runs/start` — run templates и запуск по template
 - `/runs/<run_id>` — история итераций запуска
 - `/iterations/<iteration_id>` — детальная карточка итерации
 

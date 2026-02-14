@@ -12,6 +12,7 @@ from frontend.modules.models.frontend_models import (
     FrontendActivePositionDoc,
     FrontendArchivePositionDoc,
     FrontendIterationDoc,
+    FrontendRunTemplateDoc,
 )
 
 
@@ -19,6 +20,7 @@ from frontend.modules.models.frontend_models import (
 ACTIVE_POSITIONS_COLLECTION = 'backend_positions_active'
 ARCHIVE_POSITIONS_COLLECTION = 'backend_positions_archive'
 HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
+RUN_TEMPLATES_COLLECTION = 'frontend_run_templates'
 
 
 class StorageService:
@@ -106,3 +108,38 @@ class StorageService:
         if not isinstance(item, dict):
             raise RuntimeError(f'StorageService.find_iteration: item is not dict: {type(item)}')
         return FrontendIterationDoc.from_dict(item)
+
+    def list_run_templates(self) -> List[FrontendRunTemplateDoc]:
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort('updated_at_ms', -1)
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_run_templates: item is not dict: {type(item)}')
+            out.append(FrontendRunTemplateDoc.from_dict(item))
+        return out
+
+    def create_run_template(self, template: FrontendRunTemplateDoc) -> None:
+        if template is None:
+            raise RuntimeError('StorageService.create_run_template: template is None')
+        if not isinstance(template, FrontendRunTemplateDoc):
+            raise RuntimeError(f'StorageService.create_run_template: template is not FrontendRunTemplateDoc: {type(template)}')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        doc = template.model_dump()
+        res = col.replace_one({'template_id': str(template.template_id)}, doc, upsert=True)
+        if res is None:
+            raise RuntimeError('StorageService.create_run_template: replace_one returned None')
+
+    def find_run_template(self, template_id: str) -> FrontendRunTemplateDoc:
+        if not isinstance(template_id, str) or len(template_id) == 0:
+            raise RuntimeError('StorageService.find_run_template: template_id is empty')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        item = col.find_one({'template_id': str(template_id)}, {'_id': 0})
+        if item is None:
+            raise RuntimeError(f'StorageService.find_run_template: template not found: {template_id}')
+        if not isinstance(item, dict):
+            raise RuntimeError(f'StorageService.find_run_template: item is not dict: {type(item)}')
+        return FrontendRunTemplateDoc.from_dict(item)
