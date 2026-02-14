@@ -7,3 +7,6 @@ jupyter
 python-binance
 itables
 orjson
+pymongo
+web3
+cowdao_cowpy

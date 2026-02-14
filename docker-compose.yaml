@@ -23,6 +23,7 @@ services:
       - FRONT_SECRET_KEY=${FRONT_SECRET_KEY:-}
       - FRONT_ADMIN_PASSWORD=${FRONT_ADMIN_PASSWORD:-}
       - RPC_KEY=${RPC_KEY:-}
+      - FRONT_SESSION_COOKIE_DOMAIN=${FRONT_SESSION_COOKIE_DOMAIN:-}
     ########
     networks:
       - nginx-common
@@ -40,6 +41,8 @@ services:
     volumes:
       - ./nginx/site.conf:/etc/nginx/conf.d/default.conf:ro
       - /_certbot/conf:/etc/letsencrypt
+      - ./nginx/options-ssl-nginx.conf:/etc/letsencrypt/options-ssl-nginx.conf:ro
+      - ./nginx/ssl-dhparams.pem:/etc/letsencrypt/ssl-dhparams.pem:ro
       - /_certbot/www:/var/www/certbot
     ports:
       - 80:80
