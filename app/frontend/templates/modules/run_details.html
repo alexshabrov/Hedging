@@ -35,10 +35,14 @@
                                 <tr><th>Started (UTC)</th><td id="run-started">{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
                                 <tr><th>Runtime</th><td id="run-runtime">{{ details.position.runtime_dhm }}</td></tr>
                                 <tr><th>Total quote</th><td id="run-total-quote">{{ '%.4f'|format(details.position.total_quote) }}</td></tr>
-                                <tr><th>PnL with hedge</th><td id="run-pnl-with">{{ '%.4f'|format(details.position.pnl_with_hedge_quote) }}</td></tr>
-                                <tr><th>PnL without hedge</th><td id="run-pnl-without">{{ '%.4f'|format(details.position.pnl_without_hedge_quote) }}</td></tr>
-                                <tr><th>APR with hedge %</th><td id="run-apr-with">{{ '%.4f'|format(details.position.apr_with_hedge_pct) }}</td></tr>
-                                <tr><th>APR without hedge %</th><td id="run-apr-without">{{ '%.4f'|format(details.position.apr_without_hedge_pct) }}</td></tr>
+                                <tr><th>PnL: fees</th><td id="run-pnl-fees">{{ '%.4f'|format(details.position.pnl_fees_quote) }}</td></tr>
+                                <tr><th>PnL: fees + il</th><td id="run-pnl-fees-il">{{ '%.4f'|format(details.position.pnl_fees_il_quote) }}</td></tr>
+                                <tr><th>PnL: fees + il + gas</th><td id="run-pnl-fees-il-gas">{{ '%.4f'|format(details.position.pnl_fees_il_gas_quote) }}</td></tr>
+                                <tr><th>PnL: fees + il + gas + cex</th><td id="run-pnl-fees-il-gas-cex">{{ '%.4f'|format(details.position.pnl_fees_il_gas_cex_quote) }}</td></tr>
+                                <tr><th>APR: fees %</th><td id="run-apr-fees">{{ '%.4f'|format(details.position.apr_fees_pct) }}</td></tr>
+                                <tr><th>APR: fees + il %</th><td id="run-apr-fees-il">{{ '%.4f'|format(details.position.apr_fees_il_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas %</th><td id="run-apr-fees-il-gas">{{ '%.4f'|format(details.position.apr_fees_il_gas_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas + cex %</th><td id="run-apr-fees-il-gas-cex">{{ '%.4f'|format(details.position.apr_fees_il_gas_cex_pct) }}</td></tr>
                             </tbody>
                         </table>
 
@@ -93,10 +97,14 @@
                                     <th>Finish</th>
                                     <th>Runtime sec</th>
                                     <th>Close reason</th>
-                                    <th>PnL with hedge</th>
-                                    <th>PnL without hedge</th>
-                                    <th>APR with hedge %</th>
-                                    <th>APR without hedge %</th>
+                                    <th>PnL: fees</th>
+                                    <th>PnL: fees + il</th>
+                                    <th>PnL: fees + il + gas</th>
+                                    <th>PnL: fees + il + gas + cex</th>
+                                    <th>APR: fees %</th>
+                                    <th>APR: fees + il %</th>
+                                    <th>APR: fees + il + gas %</th>
+                                    <th>APR: fees + il + gas + cex %</th>
                                 </tr>
                             </thead>
                             <tbody id="iterations-body">
@@ -109,10 +117,14 @@
                                         <td>{{ utc_ts(row.finished_at_ms) }}</td>
                                         <td>{{ '%.2f'|format(row.runtime_sec) }}</td>
                                         <td>{{ row.close_reason }}</td>
-                                        <td>{{ '%.4f'|format(row.pnl_with_hedge_quote) }}</td>
-                                        <td>{{ '%.4f'|format(row.pnl_without_hedge_quote) }}</td>
-                                        <td>{{ '%.4f'|format(row.apr_with_hedge_pct) }}</td>
-                                        <td>{{ '%.4f'|format(row.apr_without_hedge_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_gas_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_gas_cex_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_gas_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_gas_cex_pct) }}</td>
                                     </tr>
                                 {% endfor %}
                             </tbody>

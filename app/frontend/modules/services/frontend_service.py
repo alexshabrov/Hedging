@@ -270,6 +270,39 @@ class FrontendService:
         else:
             raise RuntimeError(f'FrontendService.get_run_details: run not found: {run_id}')
 
+        if len(iteration_rows) > 0:
+            sum_fees = 0.0
+            sum_fees_il = 0.0
+            sum_fees_il_gas = 0.0
+            sum_fees_il_gas_cex = 0.0
+            sum_hold_sec = 0.0
+            for row in iteration_rows:
+                sum_fees += float(row.pnl_fees_quote)
+                sum_fees_il += float(row.pnl_fees_il_quote)
+                sum_fees_il_gas += float(row.pnl_fees_il_gas_quote)
+                sum_fees_il_gas_cex += float(row.pnl_fees_il_gas_cex_quote)
+            for item in iteration_docs:
+                sum_hold_sec += float(item.pnl.pool_hold_seconds)
+            apr_fees = 0.0
+            apr_fees_il = 0.0
+            apr_fees_il_gas = 0.0
+            apr_fees_il_gas_cex = 0.0
+            if float(sum_hold_sec) > 0.0:
+                apr_fees = self._calc_apr(float(sum_fees), float(position_row.total_quote), float(sum_hold_sec))
+                apr_fees_il = self._calc_apr(float(sum_fees_il), float(position_row.total_quote), float(sum_hold_sec))
+                apr_fees_il_gas = self._calc_apr(float(sum_fees_il_gas), float(position_row.total_quote), float(sum_hold_sec))
+                apr_fees_il_gas_cex = self._calc_apr(float(sum_fees_il_gas_cex), float(position_row.total_quote), float(sum_hold_sec))
+            position_row = position_row.model_copy(update={
+                'pnl_fees_quote': float(sum_fees),
+                'pnl_fees_il_quote': float(sum_fees_il),
+                'pnl_fees_il_gas_quote': float(sum_fees_il_gas),
+                'pnl_fees_il_gas_cex_quote': float(sum_fees_il_gas_cex),
+                'apr_fees_pct': float(apr_fees),
+                'apr_fees_il_pct': float(apr_fees_il),
+                'apr_fees_il_gas_pct': float(apr_fees_il_gas),
+                'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex),
+            })
+
         failure_error_raw = self._pick_failure_error_raw(position_row, iteration_rows)
         failure_reason = self._describe_failure_reason(failure_error_raw)
 
@@ -418,6 +451,21 @@ class FrontendService:
         total_quote = float(position.total_quote)
         pnl_with_hedge_quote = float(position.pnl_with_hedge_quote)
         pnl_without_hedge_quote = float(position.pnl_without_hedge_quote)
+        pnl_fees_quote = float(position.fees_quote)
+        pnl_fees_il_quote = float(position.fees_quote) + float(position.price_pnl_quote)
+        # Position view stores aggregated costs; exact gas-only split is derived from iteration-level rows.
+        pnl_fees_il_gas_quote = float(pnl_without_hedge_quote)
+        pnl_fees_il_gas_cex_quote = float(pnl_with_hedge_quote)
+        hold_sec = float(position.avg_iteration_lifetime_sec) * float(position.iterations_finished)
+        apr_fees_pct = 0.0
+        apr_fees_il_pct = 0.0
+        apr_fees_il_gas_pct = 0.0
+        apr_fees_il_gas_cex_pct = 0.0
+        if float(hold_sec) > 0.0:
+            apr_fees_pct = self._calc_apr(float(pnl_fees_quote), float(total_quote), float(hold_sec))
+            apr_fees_il_pct = self._calc_apr(float(pnl_fees_il_quote), float(total_quote), float(hold_sec))
+            apr_fees_il_gas_pct = self._calc_apr(float(pnl_fees_il_gas_quote), float(total_quote), float(hold_sec))
+            apr_fees_il_gas_cex_pct = self._calc_apr(float(pnl_fees_il_gas_cex_quote), float(total_quote), float(hold_sec))
 
         if float(total_quote) <= 0.0:
             raise RuntimeError(f'FrontendService._build_position_row_common: total_quote <= 0: {total_quote}')
@@ -440,6 +488,14 @@ class FrontendService:
             price_lower_pct=None if position.price_lower_pct is None else float(position.price_lower_pct),
             price_upper_pct=None if position.price_upper_pct is None else float(position.price_upper_pct),
             total_quote=float(total_quote),
+            pnl_fees_quote=float(pnl_fees_quote),
+            pnl_fees_il_quote=float(pnl_fees_il_quote),
+            pnl_fees_il_gas_quote=float(pnl_fees_il_gas_quote),
+            pnl_fees_il_gas_cex_quote=float(pnl_fees_il_gas_cex_quote),
+            apr_fees_pct=float(apr_fees_pct),
+            apr_fees_il_pct=float(apr_fees_il_pct),
+            apr_fees_il_gas_pct=float(apr_fees_il_gas_pct),
+            apr_fees_il_gas_cex_pct=float(apr_fees_il_gas_cex_pct),
             pnl_with_hedge_quote=float(pnl_with_hedge_quote),
             pnl_without_hedge_quote=float(pnl_without_hedge_quote),
             pnl_with_hedge_pct=float(pnl_with_hedge_pct),
@@ -470,6 +526,10 @@ class FrontendService:
 
         pnl_with_hedge_pct = float(row.pnl_with_hedge_quote) / float(total_quote) * 100.0
         pnl_without_hedge_pct = float(row.pnl_without_hedge_quote) / float(total_quote) * 100.0
+        pnl_fees_quote = float(row.pnl.fees_received_quote)
+        pnl_fees_il_quote = float(row.pnl.fees_received_quote) + float(row.pnl.dex_realized_il_quote)
+        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) - float(row.pnl.gas_paid_quote)
+        pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(row.pnl.cex_pnl_quote)
 
         pool_hold_seconds = float(row.pnl.pool_hold_seconds)
         if float(pool_hold_seconds) <= 0.0:
@@ -477,6 +537,10 @@ class FrontendService:
 
         apr_with_hedge_pct = self._calc_apr(float(row.pnl_with_hedge_quote), float(total_quote), float(pool_hold_seconds))
         apr_without_hedge_pct = self._calc_apr(float(row.pnl_without_hedge_quote), float(total_quote), float(pool_hold_seconds))
+        apr_fees_pct = self._calc_apr(float(pnl_fees_quote), float(total_quote), float(pool_hold_seconds))
+        apr_fees_il_pct = self._calc_apr(float(pnl_fees_il_quote), float(total_quote), float(pool_hold_seconds))
+        apr_fees_il_gas_pct = self._calc_apr(float(pnl_fees_il_gas_quote), float(total_quote), float(pool_hold_seconds))
+        apr_fees_il_gas_cex_pct = self._calc_apr(float(pnl_fees_il_gas_cex_quote), float(total_quote), float(pool_hold_seconds))
 
         close_reason = None
         if live.last_snapshot is not None and live.last_snapshot.close_reason is not None:
@@ -494,6 +558,14 @@ class FrontendService:
             total_quote=float(total_quote),
             price_lower=float(calc.price_lower),
             price_upper=float(calc.price_upper),
+            pnl_fees_quote=float(pnl_fees_quote),
+            pnl_fees_il_quote=float(pnl_fees_il_quote),
+            pnl_fees_il_gas_quote=float(pnl_fees_il_gas_quote),
+            pnl_fees_il_gas_cex_quote=float(pnl_fees_il_gas_cex_quote),
+            apr_fees_pct=float(apr_fees_pct),
+            apr_fees_il_pct=float(apr_fees_il_pct),
+            apr_fees_il_gas_pct=float(apr_fees_il_gas_pct),
+            apr_fees_il_gas_cex_pct=float(apr_fees_il_gas_cex_pct),
             pnl_with_hedge_quote=float(row.pnl_with_hedge_quote),
             pnl_without_hedge_quote=float(row.pnl_without_hedge_quote),
             pnl_with_hedge_pct=float(pnl_with_hedge_pct),

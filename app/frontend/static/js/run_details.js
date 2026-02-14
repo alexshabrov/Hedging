@@ -95,10 +95,14 @@
             td(utcTs(row.finished_at_ms));
             td(fmt2(row.runtime_sec));
             td(row.close_reason || '');
-            td(fmt4(row.pnl_with_hedge_quote));
-            td(fmt4(row.pnl_without_hedge_quote));
-            td(fmt4(row.apr_with_hedge_pct));
-            td(fmt4(row.apr_without_hedge_pct));
+            td(fmt4(row.pnl_fees_quote));
+            td(fmt4(row.pnl_fees_il_quote));
+            td(fmt4(row.pnl_fees_il_gas_quote));
+            td(fmt4(row.pnl_fees_il_gas_cex_quote));
+            td(fmt4(row.apr_fees_pct));
+            td(fmt4(row.apr_fees_il_pct));
+            td(fmt4(row.apr_fees_il_gas_pct));
+            td(fmt4(row.apr_fees_il_gas_cex_pct));
             tbody.appendChild(tr);
         }
     }
@@ -113,10 +117,14 @@
         setText('run-started', utcTs(p.first_started_at_ms));
         setText('run-runtime', p.runtime_dhm);
         setText('run-total-quote', fmt4(p.total_quote));
-        setText('run-pnl-with', fmt4(p.pnl_with_hedge_quote));
-        setText('run-pnl-without', fmt4(p.pnl_without_hedge_quote));
-        setText('run-apr-with', fmt4(p.apr_with_hedge_pct));
-        setText('run-apr-without', fmt4(p.apr_without_hedge_pct));
+        setText('run-pnl-fees', fmt4(p.pnl_fees_quote));
+        setText('run-pnl-fees-il', fmt4(p.pnl_fees_il_quote));
+        setText('run-pnl-fees-il-gas', fmt4(p.pnl_fees_il_gas_quote));
+        setText('run-pnl-fees-il-gas-cex', fmt4(p.pnl_fees_il_gas_cex_quote));
+        setText('run-apr-fees', fmt4(p.apr_fees_pct));
+        setText('run-apr-fees-il', fmt4(p.apr_fees_il_pct));
+        setText('run-apr-fees-il-gas', fmt4(p.apr_fees_il_gas_pct));
+        setText('run-apr-fees-il-gas-cex', fmt4(p.apr_fees_il_gas_cex_pct));
         applyStopButton(String(p.status || ''));
         applyFailure(item);
         applyIterations(item.iterations || []);

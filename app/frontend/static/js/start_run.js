@@ -1,5 +1,6 @@
 $(document).ready(function() {
-    if (window.location.pathname !== '/runs/start') {
+    var path = String(window.location.pathname || '');
+    if (!(path === '/runs/start' || path === '/runs/start/')) {
         return;
     }
 

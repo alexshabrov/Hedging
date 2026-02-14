@@ -1491,6 +1491,8 @@ class HedgeEngine:
                     emit_reason = f'close_{st.closing_reason.value}'
                     emit_ts = int(st.phase_started_ms)
                     should_emit = True
+                    # Preserve the last close reason for snapshots/UI after we reset cycle state.
+                    st.close_reason = st.closing_reason.value if st.closing_reason is not None else st.close_reason
 
                     st.opened_leg = None
                     st.opened_base_units = 0
@@ -1523,6 +1525,8 @@ class HedgeEngine:
                     st.status = HedgeStatus.WAITING_TRIGGER
                     st.phase_started_ms = int(time.time() * 1000)
                     st.mutation_counter = int(st.mutation_counter) + 1
+                    # Preserve the last close reason for snapshots/UI after we reset round state.
+                    st.close_reason = st.closing_reason.value if st.closing_reason is not None else st.close_reason
                     
                     st.opened_leg = None
                     st.opened_base_units = 0

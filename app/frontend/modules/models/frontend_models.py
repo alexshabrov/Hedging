@@ -44,6 +44,14 @@ def frontend_position_view_from_dict(data: dict) -> BackendPositionView:
     )
 
 
+def frontend_run_aggregates_from_dict(data: dict) -> BackendRunAggregates:
+    payload = BackendRunAggregates.empty().model_dump()
+    for key in payload.keys():
+        if key in data:
+            payload[key] = data[key]
+    return BackendRunAggregates(**payload)
+
+
 ### Backend responses ###
 class FrontendBackendStartRunResponse(StrictModel):
     ok: bool
@@ -267,7 +275,7 @@ class FrontendActivePositionDoc(StrictModel):
             last_error=None if data['last_error'] is None else str(data['last_error']),
             template_id=None if ('template_id' not in data or data['template_id'] is None) else str(data['template_id']),
             config=HedgerConfig.from_dict(data['config']),
-            aggregates=BackendRunAggregates(**data['aggregates']),
+            aggregates=frontend_run_aggregates_from_dict(data['aggregates']),
             position=frontend_position_view_from_dict(data['position']),
             iterations_count=int(data['iterations_count']),
         )
@@ -301,7 +309,7 @@ class FrontendArchivePositionDoc(StrictModel):
             last_error=None if data['last_error'] is None else str(data['last_error']),
             template_id=None if ('template_id' not in data or data['template_id'] is None) else str(data['template_id']),
             config=HedgerConfig.from_dict(data['config']),
-            aggregates=BackendRunAggregates(**data['aggregates']),
+            aggregates=frontend_run_aggregates_from_dict(data['aggregates']),
             position=frontend_position_view_from_dict(data['position']),
             iterations_count=int(data['iterations_count']),
         )
@@ -637,6 +645,14 @@ class FrontendPositionRow(StrictModel):
     price_lower_pct: Optional[float]
     price_upper_pct: Optional[float]
     total_quote: float
+    pnl_fees_quote: float
+    pnl_fees_il_quote: float
+    pnl_fees_il_gas_quote: float
+    pnl_fees_il_gas_cex_quote: float
+    apr_fees_pct: float
+    apr_fees_il_pct: float
+    apr_fees_il_gas_pct: float
+    apr_fees_il_gas_cex_pct: float
     pnl_with_hedge_quote: float
     pnl_without_hedge_quote: float
     pnl_with_hedge_pct: float
@@ -667,6 +683,14 @@ class FrontendPositionRow(StrictModel):
             'price_lower_pct': None if self.price_lower_pct is None else float(self.price_lower_pct),
             'price_upper_pct': None if self.price_upper_pct is None else float(self.price_upper_pct),
             'total_quote': float(self.total_quote),
+            'pnl_fees_quote': float(self.pnl_fees_quote),
+            'pnl_fees_il_quote': float(self.pnl_fees_il_quote),
+            'pnl_fees_il_gas_quote': float(self.pnl_fees_il_gas_quote),
+            'pnl_fees_il_gas_cex_quote': float(self.pnl_fees_il_gas_cex_quote),
+            'apr_fees_pct': float(self.apr_fees_pct),
+            'apr_fees_il_pct': float(self.apr_fees_il_pct),
+            'apr_fees_il_gas_pct': float(self.apr_fees_il_gas_pct),
+            'apr_fees_il_gas_cex_pct': float(self.apr_fees_il_gas_cex_pct),
             'pnl_with_hedge_quote': float(self.pnl_with_hedge_quote),
             'pnl_without_hedge_quote': float(self.pnl_without_hedge_quote),
             'pnl_with_hedge_pct': float(self.pnl_with_hedge_pct),
@@ -695,6 +719,14 @@ class FrontendIterationRow(StrictModel):
     total_quote: float
     price_lower: Optional[float]
     price_upper: Optional[float]
+    pnl_fees_quote: float
+    pnl_fees_il_quote: float
+    pnl_fees_il_gas_quote: float
+    pnl_fees_il_gas_cex_quote: float
+    apr_fees_pct: float
+    apr_fees_il_pct: float
+    apr_fees_il_gas_pct: float
+    apr_fees_il_gas_cex_pct: float
     pnl_with_hedge_quote: float
     pnl_without_hedge_quote: float
     pnl_with_hedge_pct: float
@@ -720,6 +752,14 @@ class FrontendIterationRow(StrictModel):
             'total_quote': float(self.total_quote),
             'price_lower': None if self.price_lower is None else float(self.price_lower),
             'price_upper': None if self.price_upper is None else float(self.price_upper),
+            'pnl_fees_quote': float(self.pnl_fees_quote),
+            'pnl_fees_il_quote': float(self.pnl_fees_il_quote),
+            'pnl_fees_il_gas_quote': float(self.pnl_fees_il_gas_quote),
+            'pnl_fees_il_gas_cex_quote': float(self.pnl_fees_il_gas_cex_quote),
+            'apr_fees_pct': float(self.apr_fees_pct),
+            'apr_fees_il_pct': float(self.apr_fees_il_pct),
+            'apr_fees_il_gas_pct': float(self.apr_fees_il_gas_pct),
+            'apr_fees_il_gas_cex_pct': float(self.apr_fees_il_gas_cex_pct),
             'pnl_with_hedge_quote': float(self.pnl_with_hedge_quote),
             'pnl_without_hedge_quote': float(self.pnl_without_hedge_quote),
             'pnl_with_hedge_pct': float(self.pnl_with_hedge_pct),

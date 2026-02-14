@@ -22,8 +22,10 @@
                                 <tr><th>Total quote</th><td>{{ '%.6f'|format(details.row.total_quote) }}</td></tr>
                                 <tr><th>PnL with hedge</th><td>{{ '%.6f'|format(details.row.pnl_with_hedge_quote) }}</td></tr>
                                 <tr><th>PnL without hedge</th><td>{{ '%.6f'|format(details.row.pnl_without_hedge_quote) }}</td></tr>
-                                <tr><th>APR with hedge (%)</th><td>{{ '%.6f'|format(details.row.apr_with_hedge_pct) }}</td></tr>
-                                <tr><th>APR without hedge (%)</th><td>{{ '%.6f'|format(details.row.apr_without_hedge_pct) }}</td></tr>
+                                <tr><th>APR: fees (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_pct) }}</td></tr>
+                                <tr><th>APR: fees + il (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_il_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_il_gas_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas + cex (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_il_gas_cex_pct) }}</td></tr>
                                 <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.row.fees_quote) }}</td></tr>
                                 <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.row.price_pnl_quote) }}</td></tr>
                                 <tr><th>Hedge PnL quote</th><td>{{ '%.6f'|format(details.row.hedge_pnl_quote) }}</td></tr>
@@ -31,7 +33,7 @@
                             </tbody>
                         </table>
 
-                        <h5>LP block</h5>
+                        <h5 style="margin-top: 20px;">LP block</h5>
                         <table class="table table-sm table-bordered">
                             <tbody>
                                 <tr><th>Base price</th><td>{{ '%.6f'|format(details.lp.base_price) }}</td></tr>
@@ -50,7 +52,7 @@
                             </tbody>
                         </table>
 
-                        <h5>Hedge block</h5>
+                        <h5 style="margin-top: 20px;">Hedge block</h5>
                         <table class="table table-sm table-bordered">
                             <tbody>
                                 <tr><th>Activated</th><td>{{ details.hedge.activated }}</td></tr>
@@ -67,7 +69,7 @@
                             </tbody>
                         </table>
 
-                        <h5>Rebalance block</h5>
+                        <h5 style="margin-top: 20px;">Rebalance block</h5>
                         <table class="table table-sm table-bordered">
                             <tbody>
                                 <tr><th>Swap ok</th><td>{{ details.rebalance.swap_ok }}</td></tr>
@@ -83,7 +85,7 @@
                             </tbody>
                         </table>
 
-                        <h5>Hedge chases</h5>
+                        <h5 style="margin-top: 20px;">Hedge chases</h5>
                         <table class="table table-sm table-bordered">
                             <thead>
                                 <tr>
