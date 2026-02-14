@@ -231,14 +231,14 @@ class Backend:
 
         if hedger_to_stop is not None:
             try:
-                hedger_to_stop.stop()
+                hedger_to_stop.request_stop()
             except Exception:
                 _t, exc, _tb = sys.exc_info()
                 with ctx.lock:
-                    ctx.last_error = f'stop_run hedger.stop failed: {exc}'
+                    ctx.last_error = f'stop_run hedger.request_stop failed: {exc}'
                     ctx.updated_at_ms = int(time.time() * 1000)
                 self._write_position_active_doc(ctx)
-                raise RuntimeError(f'Backend.stop_run: hedger.stop failed: {exc}')
+                raise RuntimeError(f'Backend.stop_run: hedger.request_stop failed: {exc}')
 
         self._write_position_active_doc(ctx)
         self._logger.info(f'backend_run_stop_requested run_id={run_id}')

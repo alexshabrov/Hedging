@@ -64,6 +64,7 @@ class Hedger:
         self._rt = None
         self._cw = None
         self._rule = None
+        self._stop_requested_evt = threading.Event()
         
         self.last_stats = None
         self._is_running = False
@@ -146,6 +147,7 @@ class Hedger:
     
     def _reset_run_state(self) -> None:
         self.last_stats = None
+        self._stop_requested_evt.clear()
         
         self._run_hedge = None
         self._run_token_id = None
@@ -178,9 +180,17 @@ class Hedger:
         if 'already closed' in msg:
             return True
         return False
+
+    def request_stop(self) -> None:
+        self._stop_requested_evt.set()
     
     def stop(self) -> None:
         cleanup_errors = []
+
+        # While run() is active, stop is only a cooperative stop request.
+        if bool(self._is_running):
+            self.request_stop()
+            return
         
         if self._rt is not None:
             try:
@@ -423,6 +433,13 @@ class Hedger:
             last_mutation_counter = -1
             
             while True:
+                if bool(self._stop_requested_evt.is_set()):
+                    self._logger.info('hedger_stop_requested')
+                    if self._run_hedge is not None and bool(self._run_hedge.started):
+                        self._run_hedge.stop()
+                    self._run_status = HedgeRunStatus.FINISHED
+                    break
+
                 self._run_hedge.check()
                 snap = self._run_hedge.status()
                 
