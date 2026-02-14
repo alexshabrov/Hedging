@@ -1,6 +1,6 @@
 from live.lib.strict_model import StrictModel
 from live.logic.models import HedgeChaseKind
-from models.hedger_models import HedgerStats
+from backend.models.hedger_models import HedgerStats
 
 
 class HedgerPnlStats(StrictModel):

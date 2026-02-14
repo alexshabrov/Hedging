@@ -4,8 +4,8 @@ import orjson
 from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
-from models.hedger_models import HedgerStats
-from modules.hedger_helper import HedgerPnlStats, calc_hedger_pnl_stats
+from backend.models.hedger_models import HedgerStats
+from backend.modules.hedger_helper import HedgerPnlStats, calc_hedger_pnl_stats
 
 
 ### CLI ###

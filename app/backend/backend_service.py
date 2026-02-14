@@ -5,7 +5,7 @@ Version: 1.0
 """
 from flask import Flask
 
-from modules.backend_class import Backend
+from backend.modules.backend_class import Backend
 
 
 ### Flask ###

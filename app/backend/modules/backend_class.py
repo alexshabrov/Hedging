@@ -11,8 +11,8 @@ from flask import Flask, Response, request
 from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
-from models.hedger_models import HedgerConfig, HedgerStats
-from models.backend_models import (
+from backend.models.hedger_models import HedgerConfig, HedgerStats
+from backend.models.backend_models import (
     BackendRunLifecycle,
     BackendStartRunRequest,
     BackendRunAggregates,
@@ -20,8 +20,8 @@ from models.backend_models import (
     BackendPositionView,
     BackendRunDetailsView,
 )
-from modules.hedger_class import Hedger
-from modules.hedger_helper import calc_hedger_pnl_stats
+from backend.modules.hedger_class import Hedger
+from backend.modules.hedger_helper import calc_hedger_pnl_stats
 
 
 ### Collections ###

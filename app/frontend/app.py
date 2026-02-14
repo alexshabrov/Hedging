@@ -12,12 +12,14 @@ from frontend.modules.frontend_module import Frontend
 
 
 ### Env ###
+# Keep Mongo URI aligned with backend/default CLI settings.
+os.environ.setdefault('FRONT_MONGO_URI', 'mongodb://hedging_mongo:27017')
+os.environ.setdefault('FRONT_MONGO_DB', 'hedging')
+os.environ.setdefault('FRONT_BACKEND_URL', 'http://127.0.0.1:8080')
+
 for _name in [
     'FRONT_SECRET_KEY',
     'FRONT_ADMIN_PASSWORD',
-    'FRONT_BACKEND_URL',
-    'FRONT_MONGO_URI',
-    'FRONT_MONGO_DB',
 ]:
     if _name not in os.environ:
         raise RuntimeError(f'{_name} is not set')

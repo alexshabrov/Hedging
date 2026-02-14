@@ -26,7 +26,7 @@ from dex.swappers.swapper_factory import SwapperFactory
 from dex.models.swapper_models import CowSwapConfig, SwapRequest, SwapperType, SwapResult
 from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, DexRunStats
 
-from models.hedger_models import (
+from backend.models.hedger_models import (
     HedgerConfig,
     HedgeCalcStats,
     LiveStats,

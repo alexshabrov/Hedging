@@ -8,8 +8,8 @@ from typing import List, Optional
 import orjson
 
 from live.lib.strict_model import StrictModel
-from models.hedger_models import HedgerConfig, HedgerStats
-from modules.hedger_helper import HedgerPnlStats
+from backend.models.hedger_models import HedgerConfig, HedgerStats
+from backend.modules.hedger_helper import HedgerPnlStats
 
 
 ### Enums ###

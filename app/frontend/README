@@ -23,13 +23,13 @@ Version: 1.0
 
 - `FRONT_SECRET_KEY`
 - `FRONT_ADMIN_PASSWORD`
-- `FRONT_BACKEND_URL` (пример: `http://127.0.0.1:8080`)
-- `FRONT_MONGO_URI` (пример: `mongodb://hedging_mongo:27017`)
-- `FRONT_MONGO_DB` (пример: `hedging`)
 
 Опционально:
 
 - `FRONT_SESSION_COOKIE_DOMAIN`
+- `FRONT_BACKEND_URL` (по умолчанию: `http://127.0.0.1:8080`)
+- `FRONT_MONGO_URI` (по умолчанию: `mongodb://hedging_mongo:27017`)
+- `FRONT_MONGO_DB` (по умолчанию: `hedging`)
 
 ==================================================
 3) Запуск

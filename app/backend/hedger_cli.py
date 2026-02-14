@@ -1,8 +1,8 @@
 import argparse, os, sys
 
-from modules.hedger_class import Hedger
-from modules.hedger_helper import calc_hedger_pnl_stats
-from models.hedger_models import HedgerConfig, CexTriggerMode
+from backend.modules.hedger_class import Hedger
+from backend.modules.hedger_helper import calc_hedger_pnl_stats
+from backend.models.hedger_models import HedgerConfig, CexTriggerMode
 
 
 ### CLI ###
