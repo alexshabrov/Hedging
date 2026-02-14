@@ -3,6 +3,7 @@ Frontend domain service
 Date: 2026-02-13
 Version: 3.0
 """
+import re
 import time, uuid
 from typing import List
 
@@ -269,12 +270,58 @@ class FrontendService:
         else:
             raise RuntimeError(f'FrontendService.get_run_details: run not found: {run_id}')
 
+        failure_error_raw = self._pick_failure_error_raw(position_row, iteration_rows)
+        failure_reason = self._describe_failure_reason(failure_error_raw)
+
         return FrontendRunDetailsView(
             template_id=None if template_id is None else str(template_id),
             config=config,
             position=position_row,
             iterations=iteration_rows,
+            failure_reason=failure_reason,
+            failure_error_raw=failure_error_raw,
         )
+
+    def _pick_failure_error_raw(self, position_row: FrontendPositionRow, iteration_rows: List[FrontendIterationRow]) -> str | None:
+        if position_row.last_error is not None and len(str(position_row.last_error)) > 0:
+            return str(position_row.last_error)
+
+        for row in iteration_rows:
+            if row.error is not None and len(str(row.error)) > 0:
+                return str(row.error)
+
+        return None
+
+    def _describe_failure_reason(self, raw_error: str | None) -> str | None:
+        if raw_error is None:
+            return None
+
+        err = str(raw_error).strip()
+        if len(err) == 0:
+            return None
+
+        m = re.search(r'balance0=(\d+)\s+need0=(\d+)\s+balance1=(\d+)\s+need1=(\d+)', err)
+        if m is not None:
+            balance0 = int(m.group(1))
+            need0 = int(m.group(2))
+            balance1 = int(m.group(3))
+            need1 = int(m.group(4))
+            miss0 = max(0, need0 - balance0)
+            miss1 = max(0, need1 - balance1)
+            return (
+                'Run failed on DEX mint step due to insufficient wallet balance.\n'
+                f'token0: available={balance0}, required={need0}, deficit={miss0}\n'
+                f'token1: available={balance1}, required={need1}, deficit={miss1}\n'
+                'To fix: add missing funds for deficit token(s), or reduce total_quote/range.'
+            )
+
+        if 'insufficient balance' in err.lower():
+            return (
+                'Run failed due to insufficient wallet balance for the configured mint amounts.\n'
+                'To fix: add funds to wallet, or reduce total_quote/range.'
+            )
+
+        return f'Run failed with backend error: {err}'
 
     def get_iteration_details(self, iteration_id: str) -> FrontendIterationDetailsView:
         item = self._storage.find_iteration(iteration_id)

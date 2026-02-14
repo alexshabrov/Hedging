@@ -739,6 +739,8 @@ class FrontendRunDetailsView(StrictModel):
     config: HedgerConfig
     position: FrontendPositionRow
     iterations: List[FrontendIterationRow]
+    failure_reason: Optional[str]
+    failure_error_raw: Optional[str]
 
     def model_dump(self) -> dict:  # type: ignore[override]
         out_iterations = []
@@ -750,6 +752,8 @@ class FrontendRunDetailsView(StrictModel):
             'config': self.config.model_dump(),
             'position': self.position.model_dump(),
             'iterations': out_iterations,
+            'failure_reason': self.failure_reason,
+            'failure_error_raw': self.failure_error_raw,
         }
 
 
