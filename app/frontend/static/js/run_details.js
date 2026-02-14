@@ -11,6 +11,48 @@
         el.textContent = (value === null || value === undefined) ? '-' : String(value);
     }
 
+    function setHtml(id, html) {
+        var el = byId(id);
+        if (!el) {
+            return;
+        }
+        el.innerHTML = html;
+    }
+
+    function escapeHtml(value) {
+        var s = String(value === null || value === undefined ? '-' : value);
+        return s
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function statusBadgeClass(status) {
+        var key = String(status === null || status === undefined ? '-' : status).toLowerCase();
+        if (['running', 'active', 'ok', 'done', 'finished', 'success', 'completed', 'filled'].indexOf(key) >= 0) {
+            return 'badge-success';
+        }
+        if (['initialized', 'initializing', 'created', 'new', 'pending', 'open'].indexOf(key) >= 0) {
+            return 'badge-info';
+        }
+        if (['stopping', 'pausing', 'warning'].indexOf(key) >= 0) {
+            return 'badge-warning';
+        }
+        if (['failed', 'error', 'rejected', 'cancelled', 'canceled', 'dead'].indexOf(key) >= 0) {
+            return 'badge-danger';
+        }
+        if (['stopped', 'closed', 'inactive'].indexOf(key) >= 0) {
+            return 'badge-secondary';
+        }
+        return 'badge-light';
+    }
+
+    function statusBadgeHtml(status) {
+        return '<span class="badge ' + statusBadgeClass(status) + '">' + escapeHtml(status) + '</span>';
+    }
+
     function fmt4(value) {
         var n = Number(value);
         if (!Number.isFinite(n)) {
@@ -90,7 +132,9 @@
             a.textContent = String(row.id);
             tdId.appendChild(a);
             tr.appendChild(tdId);
-            td(String(row.status));
+            var tdStatus = document.createElement('td');
+            tdStatus.innerHTML = statusBadgeHtml(row.status);
+            tr.appendChild(tdStatus);
             td(utcTs(row.started_at_ms));
             td(utcTs(row.finished_at_ms));
             td(fmt2(row.runtime_sec));
@@ -112,7 +156,7 @@
             return;
         }
         var p = item.position;
-        setText('run-status', p.status);
+        setHtml('run-status', statusBadgeHtml(p.status));
         setText('run-symbol', p.symbol);
         setText('run-started', utcTs(p.first_started_at_ms));
         setText('run-runtime', p.runtime_dhm);

@@ -32,7 +32,7 @@
                                     <tr>
                                         <td><a href="/runs/{{ row.run_id }}">{{ row.run_id }}</a></td>
                                         <td>{{ row.symbol }}</td>
-                                        <td>{{ row.status }}</td>
+                                        <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
                                         <td>{{ utc_ts(row.first_started_at_ms) }}</td>
                                         <td>{{ row.runtime_dhm }}</td>
                                         <td>{{ row.iterations_finished }}</td>

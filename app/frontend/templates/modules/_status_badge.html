@@ -1,0 +1,15 @@
+{% set status_text = status if status is not none else '-' %}
+{% set status_key = status_text|string|lower %}
+{% set badge_class = 'badge-light' %}
+{% if status_key in ['running', 'active', 'ok', 'done', 'finished', 'success', 'completed', 'filled'] %}
+    {% set badge_class = 'badge-success' %}
+{% elif status_key in ['initialized', 'initializing', 'created', 'new', 'pending', 'open'] %}
+    {% set badge_class = 'badge-info' %}
+{% elif status_key in ['stopping', 'pausing', 'warning'] %}
+    {% set badge_class = 'badge-warning' %}
+{% elif status_key in ['failed', 'error', 'rejected', 'cancelled', 'canceled', 'dead'] %}
+    {% set badge_class = 'badge-danger' %}
+{% elif status_key in ['stopped', 'closed', 'inactive'] %}
+    {% set badge_class = 'badge-secondary' %}
+{% endif %}
+<span class="badge {{ badge_class }}">{{ status_text }}</span>

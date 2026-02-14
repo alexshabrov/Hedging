@@ -14,7 +14,7 @@
                             <tbody>
                                 <tr><th>ID</th><td>{{ details.row.id }}</td></tr>
                                 <tr><th>Run ID</th><td>{{ details.row.run_id }}</td></tr>
-                                <tr><th>Status</th><td>{{ details.row.status }}</td></tr>
+                                <tr><th>Status</th><td>{% with status=details.row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
                                 <tr><th>Close reason</th><td>{{ details.row.close_reason }}</td></tr>
                                 <tr><th>Started</th><td>{{ utc_ts(details.row.started_at_ms) }}</td></tr>
                                 <tr><th>Finished</th><td>{{ utc_ts(details.row.finished_at_ms) }}</td></tr>
@@ -76,7 +76,7 @@
                                 <tr><th>Execution fee</th><td>{{ details.rebalance.execution_fee }}</td></tr>
                                 <tr><th>Fee token</th><td>{{ details.rebalance.fee_token }}</td></tr>
                                 <tr><th>Elapsed sec</th><td>{{ details.rebalance.elapsed_sec }}</td></tr>
-                                <tr><th>Order status</th><td>{{ details.rebalance.order_status }}</td></tr>
+                                <tr><th>Order status</th><td>{% with status=details.rebalance.order_status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
                                 <tr><th>Order url</th><td>{{ details.rebalance.order_url }}</td></tr>
                                 <tr><th>Swap cost quote</th><td>{{ '%.6f'|format(details.rebalance.swap_cost_quote) }}</td></tr>
                             </tbody>

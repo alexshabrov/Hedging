@@ -30,7 +30,7 @@
 
                         <table class="table table-sm table-bordered">
                             <tbody>
-                                <tr><th>Status</th><td id="run-status">{{ details.position.status }}</td></tr>
+                                <tr><th>Status</th><td id="run-status">{% with status=details.position.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
                                 <tr><th>Symbol</th><td id="run-symbol">{{ details.position.symbol }}</td></tr>
                                 <tr><th>Started (UTC)</th><td id="run-started">{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
                                 <tr><th>Runtime</th><td id="run-runtime">{{ details.position.runtime_dhm }}</td></tr>
@@ -112,7 +112,7 @@
                                     <tr>
                                         <td>{{ row.iteration_no }}</td>
                                         <td><a href="/iterations/{{ row.id }}">{{ row.id }}</a></td>
-                                        <td>{{ row.status }}</td>
+                                        <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
                                         <td>{{ utc_ts(row.started_at_ms) }}</td>
                                         <td>{{ utc_ts(row.finished_at_ms) }}</td>
                                         <td>{{ '%.2f'|format(row.runtime_sec) }}</td>
