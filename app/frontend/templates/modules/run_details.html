@@ -19,7 +19,7 @@
                 <div class="card">
                     <div class="card-header">Run {{ details.position.run_id }}</div>
                     <div class="card-body">
-                        <form method="POST" action="/runs/{{ details.position.run_id }}/stop">
+                        <form method="POST" action="/runs/{{ details.position.run_id }}/stop" onsubmit="return confirm('Stop this run?');">
                             <span id="run-stop-wrap" {% if details.position.status not in ['initialized', 'running', 'stopping'] %}style="display:none;"{% endif %}>
                                 <button type="submit" class="btn btn-danger btn-sm">Stop run</button>
                             </span>
