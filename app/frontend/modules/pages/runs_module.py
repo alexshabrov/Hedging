@@ -118,6 +118,18 @@ class RunsModule:
                 flash(str(exc))
             return redirect(url_for('run_details_page', run_id=run_id))
 
+        @app.route('/runs/<run_id>/collect', methods=['POST'])
+        @login_required
+        def run_collect_page(run_id: str):
+            try:
+                res = self._service.collect_run(str(run_id))
+                flash(f'Collect sent: token_id={res.get("token_id")} tx={res.get("tx_hash")}')
+            except Exception:
+                _t, exc, _tb = sys.exc_info()
+                self._logger.error(f'run_collect_page_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
+                flash(str(exc))
+            return redirect(url_for('run_details_page', run_id=run_id))
+
         @app.route('/iterations/<iteration_id>', methods=['GET'])
         @login_required
         def iteration_details_page(iteration_id: str):

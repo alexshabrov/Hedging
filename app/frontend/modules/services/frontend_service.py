@@ -209,6 +209,13 @@ class FrontendService:
         self._backend_api.stop_run(run_id)
         self._logger.info(f'frontend_stop_run_ok run_id={run_id}')
 
+    def collect_run(self, run_id: str) -> dict:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('FrontendService.collect_run: run_id is empty')
+        out = self._backend_api.collect_run(run_id)
+        self._logger.info(f'frontend_collect_run_ok run_id={run_id}')
+        return out
+
     def list_positions(self) -> List[FrontendPositionRow]:
         active_docs = self._storage.list_active_positions()
         archive_docs = self._storage.list_archive_positions()

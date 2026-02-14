@@ -23,12 +23,14 @@ from backend.models.backend_models import (
 from backend.modules.hedger_class import Hedger
 from backend.modules.hedger_helper import calc_hedger_pnl_stats
 from backend.modules.backend_env import read_runtime_secrets
+from dex.contract.contract_wrapper import ContractWrapper
 
 
 ### Collections ###
 ACTIVE_POSITIONS_COLLECTION = 'backend_positions_active'
 ARCHIVE_POSITIONS_COLLECTION = 'backend_positions_archive'
 HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
+RUN_TOKENS_COLLECTION = 'backend_run_tokens'
 
 
 ### Run context ###
@@ -118,6 +120,15 @@ class Backend:
                 return self._json_response({'ok': True, 'run_id': str(run_id)}, 200)
             except Exception as exc:
                 self._logger.error(f'api_run_stop_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
+                return self._json_response({'ok': False, 'error': str(exc)}, 400)
+
+        @self._app.route('/api/runs/<run_id>/collect', methods=['POST'])
+        def api_run_collect(run_id: str) -> Response:
+            try:
+                out = self.collect_run_fees(str(run_id))
+                return self._json_response({'ok': True, 'run_id': str(run_id), 'item': out}, 200)
+            except Exception as exc:
+                self._logger.error(f'api_run_collect_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
         @self._app.route('/api/positions', methods=['GET'])
@@ -354,6 +365,12 @@ class Backend:
                         continue
                     token_id = int(item.stats.uniswap.token_id)
                     break
+            if token_id is None:
+                token_id = self._read_saved_run_token_id(
+                    mongo_uri=str(ctx.config.mongo_uri),
+                    mongo_db=str(ctx.config.mongo_db),
+                    run_id=str(ctx.run_id),
+                )
 
             return BackendPositionView(
                 run_id=str(ctx.run_id),
@@ -381,6 +398,150 @@ class Backend:
                 token_id=None if token_id is None else int(token_id),
                 last_error=None if ctx.last_error is None else str(ctx.last_error),
             )
+
+    def _extract_token_id_from_hedger(self, hedger: Hedger) -> Optional[int]:
+        if hedger is None:
+            return None
+        if hedger._run_token_id is not None and int(hedger._run_token_id) > 0:
+            return int(hedger._run_token_id)
+        if hedger.last_stats is not None and hedger.last_stats.uniswap is not None:
+            if hedger.last_stats.uniswap.token_id is not None and int(hedger.last_stats.uniswap.token_id) > 0:
+                return int(hedger.last_stats.uniswap.token_id)
+        return None
+
+    def _try_persist_run_token(self, ctx: BackendRunContext, hedger: Hedger) -> None:
+        try:
+            token_id = self._extract_token_id_from_hedger(hedger)
+            if token_id is None:
+                return
+            self._save_run_token(
+                mongo_uri=str(ctx.config.mongo_uri),
+                mongo_db=str(ctx.config.mongo_db),
+                run_id=str(ctx.run_id),
+                token_id=int(token_id),
+                network=str(ctx.config.network),
+                pool_address=str(ctx.config.pool_address),
+                symbol=str(ctx.config.symbol),
+                template_id=None if ctx.template_id is None else str(ctx.template_id),
+            )
+        except Exception as exc:
+            self._logger.warning(f'backend_save_run_token_skipped run_id={ctx.run_id} error={exc}')
+
+    def _save_run_token(
+        self,
+        mongo_uri: str,
+        mongo_db: str,
+        run_id: str,
+        token_id: int,
+        network: str,
+        pool_address: str,
+        symbol: str,
+        template_id: Optional[str],
+    ) -> None:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('Backend._save_run_token: run_id is empty')
+        if int(token_id) <= 0:
+            raise RuntimeError('Backend._save_run_token: token_id must be > 0')
+
+        now_ms = int(time.time() * 1000)
+        client = MongoClient(str(mongo_uri), serverSelectionTimeoutMS=5000)
+        try:
+            _ = client.server_info()
+            db = client[str(mongo_db)]
+            col = db[str(RUN_TOKENS_COLLECTION)]
+            existing = col.find_one({'run_id': str(run_id)})
+            created_at_ms = int(now_ms)
+            if existing is not None and 'created_at_ms' in existing:
+                created_at_ms = int(existing['created_at_ms'])
+            doc = {
+                'run_id': str(run_id),
+                'token_id': int(token_id),
+                'network': str(network),
+                'pool_address': str(pool_address),
+                'symbol': str(symbol),
+                'template_id': None if template_id is None else str(template_id),
+                'created_at_ms': int(created_at_ms),
+                'updated_at_ms': int(now_ms),
+            }
+            res = col.replace_one({'run_id': str(run_id)}, doc, upsert=True)
+            if res is None:
+                raise RuntimeError('Backend._save_run_token: replace_one returned None')
+        finally:
+            client.close()
+
+    def _read_saved_run_token_id(self, mongo_uri: str, mongo_db: str, run_id: str) -> Optional[int]:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('Backend._read_saved_run_token_id: run_id is empty')
+        client = MongoClient(str(mongo_uri), serverSelectionTimeoutMS=5000)
+        try:
+            _ = client.server_info()
+            db = client[str(mongo_db)]
+            col = db[str(RUN_TOKENS_COLLECTION)]
+            doc = col.find_one({'run_id': str(run_id)})
+            if doc is None:
+                return None
+            if 'token_id' not in doc or doc['token_id'] is None:
+                return None
+            token_id = int(doc['token_id'])
+            if int(token_id) <= 0:
+                return None
+            return int(token_id)
+        finally:
+            client.close()
+
+    def collect_run_fees(self, run_id: str) -> dict:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('Backend.collect_run_fees: run_id is empty')
+
+        with self._lock:
+            if run_id not in self._runs:
+                raise RuntimeError(f'Backend.collect_run_fees: run not found: {run_id}')
+            ctx = self._runs[run_id]
+
+        with ctx.lock:
+            lifecycle = ctx.lifecycle
+            config = ctx.config
+            template_id = ctx.template_id
+
+        if lifecycle != BackendRunLifecycle.FAILED:
+            raise RuntimeError(f'Backend.collect_run_fees: run is not failed: {lifecycle.value}')
+
+        token_id = self._read_saved_run_token_id(
+            mongo_uri=str(config.mongo_uri),
+            mongo_db=str(config.mongo_db),
+            run_id=str(run_id),
+        )
+        if token_id is None:
+            raise RuntimeError(f'Backend.collect_run_fees: token_id not found for run_id={run_id}')
+
+        cw = ContractWrapper(
+            rpc_url=str(config.rpc_url),
+            pool_address=str(config.pool_address),
+            network=str(config.network),
+            private_key=str(self._private_key),
+            wallet_address=str(self._wallet_address) if self._wallet_address is not None else None,
+        )
+        collect_res = cw.collect_fees(int(token_id))
+
+        self._save_run_token(
+            mongo_uri=str(config.mongo_uri),
+            mongo_db=str(config.mongo_db),
+            run_id=str(run_id),
+            token_id=int(token_id),
+            network=str(config.network),
+            pool_address=str(config.pool_address),
+            symbol=str(config.symbol),
+            template_id=None if template_id is None else str(template_id),
+        )
+
+        self._logger.info(f'backend_collect_done run_id={run_id} token_id={token_id} ok={collect_res.ok} tx={collect_res.tx_hash}')
+        return {
+            'token_id': int(token_id),
+            'ok': bool(collect_res.ok),
+            'tx_hash': str(collect_res.tx_hash),
+            'amount_base': float(collect_res.amount_base),
+            'amount_quote': float(collect_res.amount_quote),
+        }
 
     def _format_dhm(self, runtime_sec: float) -> str:
         if float(runtime_sec) < 0.0:
@@ -465,6 +626,8 @@ class Backend:
             stats = hedger.run()
         except BaseException:
             run_exc = sys.exc_info()
+        finally:
+            self._try_persist_run_token(ctx, hedger)
 
         report_exc = None
         if run_exc is None:
@@ -482,6 +645,8 @@ class Backend:
             hedger.stop()
         except BaseException:
             stop_exc = sys.exc_info()
+        finally:
+            self._try_persist_run_token(ctx, hedger)
 
         with ctx.lock:
             ctx.current_hedger = None

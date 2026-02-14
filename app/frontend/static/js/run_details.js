@@ -80,13 +80,20 @@
             ' ' + p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) + ':' + p2(d.getUTCSeconds());
     }
 
-    function applyStopButton(status) {
-        var wrap = byId('run-stop-wrap');
-        if (!wrap) {
-            return;
-        }
+    function applyActionButtons(status, tokenId) {
+        var stopWrap = byId('run-stop-wrap');
+        var collectWrap = byId('run-collect-wrap');
         var active = status === 'initialized' || status === 'running' || status === 'stopping';
-        wrap.style.display = active ? '' : 'none';
+        if (stopWrap) {
+            stopWrap.style.display = active ? '' : 'none';
+        }
+
+        var tokenNum = Number(tokenId);
+        var hasToken = Number.isFinite(tokenNum) && tokenNum > 0;
+        var canCollect = status === 'failed' && hasToken;
+        if (collectWrap) {
+            collectWrap.style.display = canCollect ? '' : 'none';
+        }
     }
 
     function applyFailure(item) {
@@ -170,7 +177,7 @@
         setText('run-apr-fees-il', fmt4(p.apr_fees_il_pct));
         setText('run-apr-fees-il-gas', fmt4(p.apr_fees_il_gas_pct));
         setText('run-apr-fees-il-gas-cex', fmt4(p.apr_fees_il_gas_cex_pct));
-        applyStopButton(String(p.status || ''));
+        applyActionButtons(String(p.status || ''), p.token_id);
         applyFailure(item);
         applyIterations(item.iterations || []);
     }

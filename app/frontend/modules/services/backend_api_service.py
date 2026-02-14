@@ -58,6 +58,20 @@ class BackendApiService:
         if not bool(parsed.ok):
             raise RuntimeError(f'BackendApiService.stop_run: backend error: {parsed.error}')
 
+    def collect_run(self, run_id: str) -> dict:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('BackendApiService.collect_run: run_id is empty')
+
+        res = self._request_json('POST', f'/api/runs/{run_id}/collect', None)
+        if 'ok' not in res:
+            raise RuntimeError('BackendApiService.collect_run: missing ok in response')
+        if not bool(res['ok']):
+            err = None if 'error' not in res else res['error']
+            raise RuntimeError(f'BackendApiService.collect_run: backend error: {err}')
+        if 'item' not in res or not isinstance(res['item'], dict):
+            raise RuntimeError('BackendApiService.collect_run: missing item in response')
+        return res['item']
+
     def list_runtime_positions(self) -> List[BackendPositionView]:
         res = self._request_json('GET', '/api/positions', None)
         parsed = FrontendBackendPositionsResponse.from_dict(res)
