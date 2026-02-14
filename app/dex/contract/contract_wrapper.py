@@ -3,7 +3,7 @@ Contract wrapper
 Date: 2026-02-09
 Version: 1.0
 """
-import json, math
+import json, math, time
 from pathlib import Path
 from decimal import Decimal, getcontext
 from typing import Dict, List, Optional
@@ -647,11 +647,16 @@ class ContractWrapper:
         if not bool(receipt.status):
             raise RuntimeError('approve failed')
 
-        allowance = erc20.functions.allowance(
-            self._wallet_address,
-            self._npm_address,
-        ).call()
-        if int(allowance) < int(amount):
+        for t in range(3):
+            allowance = erc20.functions.allowance(
+                self._wallet_address,
+                self._npm_address,
+            ).call()
+            if int(allowance) >= int(amount):
+                break
+            if t < 2:
+                time.sleep(1)
+        else:
             raise RuntimeError('approve did not increase allowance')
 
     def get_balance(self, token_address: str) -> int:
