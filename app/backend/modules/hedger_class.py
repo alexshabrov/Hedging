@@ -752,7 +752,11 @@ class Hedger:
             sell_amount = float(base_needed)
         
         else:
-            raise RuntimeError('Hedger._rebalance: balances are not in opposite directions')
+            self._logger.info(
+                'hedger_rebalance_skip_non_opposite '
+                f'delta_quote={delta_quote} delta_base={delta_base}'
+            )
+            return None
         
         swapper_config = CowSwapConfig(
             swapper_type=SwapperType.COW_SWAP,
