@@ -3,7 +3,7 @@ Wallet on-chain history and realized PnL report
 Date: 2026-02-15
 Version: 1.1
 """
-import argparse, json, requests
+import argparse, requests
 from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
 from web3 import Web3
@@ -856,24 +856,37 @@ def main() -> None:
         eth_price=float(eth_price),
     )
 
+    print('=== WALLET HISTORY REPORT ===')
     print(f'Wallet: {report.wallet}')
     print(f'Network: {report.network}')
     print(f'Blocks: {report.from_block}..{report.to_block}')
     print(f'ETH price ({args.binance_symbol}): {report.eth_price_usdt:.8f}')
+    print(f'Transactions analyzed: {report.transactions_total}')
+    print(f'Uniswap swaps: {report.uniswap_swaps_total}')
     print('')
+
+    print('=== TRANSACTIONS ===')
+    for idx, tx in enumerate(report.analyzed_transactions, start=1):
+        tx_pnl_usdc = float(tx.usdc_delta) + float(tx.weth_delta) * float(report.eth_price_usdt) - float(tx.gas_eth) * float(report.eth_price_usdt)
+        print(f'[{idx}] block={tx.block_number} ts_ms={tx.timestamp_ms} kind={tx.kind.value} swap={int(tx.is_uniswap_swap)}')
+        print(f'    tx={tx.tx_hash}')
+        print(f'    delta:   WETH={tx.weth_delta:.8f} USDC={tx.usdc_delta:.8f}')
+        print(f'    pool io: in(WETH={tx.increase_weth:.8f}, USDC={tx.increase_usdc:.8f}) out(WETH={tx.decrease_weth:.8f}, USDC={tx.decrease_usdc:.8f}) collect(WETH={tx.collect_weth:.8f}, USDC={tx.collect_usdc:.8f})')
+        print(f'    gas:     ETH={tx.gas_eth:.8f} USDC={float(tx.gas_eth) * float(report.eth_price_usdt):.8f}')
+        print(f'    tx pnl (USDC, delta-gas): {tx_pnl_usdc:.8f}')
+        print('')
+
+    print('=== SUMMARY ===')
     print(f'WETH start/end: {report.balances.start_weth:.8f} -> {report.balances.end_weth:.8f} (delta {report.balances.delta_weth:.8f})')
     print(f'USDC start/end: {report.balances.start_usdc:.8f} -> {report.balances.end_usdc:.8f} (delta {report.balances.delta_usdc:.8f})')
     print('')
     print(f'Fees from pool: WETH={report.pnl.fees.weth:.8f}, USDC={report.pnl.fees.usdc:.8f}')
-    print(f'Realized IL:   WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f}')
-    print(f'Uniswap swaps: WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
+    print(f'Realized IL:    WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f}')
+    print(f'Uniswap swaps:  WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
     print(f'Gas (add/remove/rebalance): ETH={report.pnl.gas_eth:.8f}, USDC={report.pnl.gas_usdc:.8f}')
     print('')
     print(f'PnL by components (USDC): {report.pnl.pnl_usdc_by_components:.8f}')
     print(f'PnL by balances   (USDC): {report.pnl_usdc_by_balances:.8f}')
-    print(f'Wallet tx analyzed: {report.transactions_total}, uniswap swaps: {report.uniswap_swaps_total}')
-    print('')
-    print(json.dumps(report.model_dump(), ensure_ascii=True, indent=2))
 
 
 if __name__ == '__main__':
