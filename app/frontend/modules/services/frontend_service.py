@@ -536,7 +536,8 @@ class FrontendService:
         pnl_without_hedge_pct = float(row.pnl_without_hedge_quote) / float(total_quote) * 100.0
         pnl_fees_quote = float(row.pnl.fees_received_quote)
         pnl_fees_il_quote = float(row.pnl.fees_received_quote) + float(row.pnl.dex_realized_il_quote)
-        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) - float(row.pnl.gas_paid_quote)
+        # "Gas" bucket in APR includes all execution costs for the iteration (on-chain gas + rebalance swap fee).
+        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) - float(row.costs_quote)
         pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(row.pnl.cex_pnl_quote)
 
         pool_hold_seconds = float(row.pnl.pool_hold_seconds)

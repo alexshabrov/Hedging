@@ -222,6 +222,31 @@ class Position:
         
         self.logger.info(f'position_balance_mutation uid={self.uid} symbol={self.symbol} prev_units={int(prev_units)} new_units={int(new_units)} delta_units={int(delta)} ctx={ctx} data={data}')
 
+    def _is_reduce_only_side(self, side):
+        """
+        Decide whether a new order should be marked reduce-only based on current net base balance.
+
+        Rule:
+         - balance > 0 and side=SELL -> reduce-only (reducing long exposure)
+         - balance < 0 and side=BUY  -> reduce-only (reducing short exposure)
+         - otherwise -> not reduce-only (opening/increasing exposure)
+        """
+        if side is None:
+            raise RuntimeError('Position._is_reduce_only_side: side is None')
+
+        if side != OrderSide.BUY and side != OrderSide.SELL:
+            raise RuntimeError(f'Position._is_reduce_only_side: bad side: {side}')
+
+        bal = int(self._sum_position_base_balance_units())
+
+        if bal > 0 and side == OrderSide.SELL:
+            return True
+
+        if bal < 0 and side == OrderSide.BUY:
+            return True
+
+        return False
+
     def add_command(self, cmd):
         """
         Public entrypoint: enqueue a chase command into the unified loop inbox.
@@ -1205,7 +1230,9 @@ class Position:
          - On other exchange errors: emits CHASE_EXCHANGE_ERROR and returns (retry on next tick).
          - On success: attaches order_id to fills router and emits CHASE_ORDER_CREATED.
         """
-        # Create GTX LIMIT order and attach it for fills routing
+        # Create GTX LIMIT order and attach it for fills routing.
+        # For close legs we must pass reduce_only=True, otherwise tiny residual tails can be
+        # rejected by exchange min-notional checks (e.g. Binance -4164).
         ch = self.chase
         if ch is None:
             raise RuntimeError('Position._chase_create: chase is None')
@@ -1219,6 +1246,8 @@ class Position:
         if volume_units <= 0:
             raise RuntimeError(f'Position._chase_create: bad volume_units: {volume_units}')
 
+        reduce_only = bool(self._is_reduce_only_side(ch.side))
+
         order_id, can_repeat, order_error, err = self.exchange.create_order(
             position_side=PositionSide.BOTH,
             order_side=ch.side,
@@ -1226,7 +1255,7 @@ class Position:
             symbol=self.symbol,
             base_volume=int(volume_units),
             price=int(price_units),
-            reduce_only=False,
+            reduce_only=bool(reduce_only),
         )
 
         if order_error is not None:
@@ -1243,6 +1272,7 @@ class Position:
                         'can_repeat': bool(can_repeat),
                         'price_units': int(price_units),
                         'volume_units': int(volume_units),
+                        'reduce_only': bool(reduce_only),
                         'gtx_violations': int(ch.gtx_violations),
                         'error': str(err) if err is not None else None,
                         'stage': 'create',
@@ -1261,6 +1291,7 @@ class Position:
                     'error': str(err) if err is not None else None,
                     'price_units': int(price_units),
                     'volume_units': int(volume_units),
+                    'reduce_only': bool(reduce_only),
                     'stage': 'create',
                 },
             ), 'Position._chase_create')
@@ -1280,6 +1311,7 @@ class Position:
                     'error': str(err),
                     'price_units': int(price_units),
                     'volume_units': int(volume_units),
+                    'reduce_only': bool(reduce_only),
                     'stage': 'create',
                 },
             ), 'Position._chase_create')
@@ -1312,6 +1344,7 @@ class Position:
                 'order_id': str(order_id),
                 'price_units': int(price_units),
                 'volume_units': int(volume_units),
+                'reduce_only': bool(reduce_only),
             },
         ), 'Position._chase_create')
 
