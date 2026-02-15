@@ -29,28 +29,18 @@
             .replace(/'/g, '&#39;');
     }
 
-    function statusBadgeClass(status) {
-        var key = String(status === null || status === undefined ? '-' : status).toLowerCase();
-        if (['running', 'active', 'ok', 'done', 'finished', 'success', 'completed', 'filled'].indexOf(key) >= 0) {
-            return 'badge-success';
-        }
-        if (['initialized', 'initializing', 'created', 'new', 'pending', 'open'].indexOf(key) >= 0) {
-            return 'badge-info';
-        }
-        if (['stopping', 'pausing', 'warning'].indexOf(key) >= 0) {
-            return 'badge-warning';
-        }
-        if (['failed', 'error', 'rejected', 'cancelled', 'canceled', 'dead'].indexOf(key) >= 0) {
-            return 'badge-danger';
-        }
-        if (['stopped', 'closed', 'inactive'].indexOf(key) >= 0) {
-            return 'badge-secondary';
-        }
-        return 'badge-light';
+    function statusBadgeKey(status) {
+        var raw = String(status === null || status === undefined ? '-' : status).trim().toLowerCase();
+        var key = raw
+            .replace(/_/g, '-')
+            .replace(/[^a-z0-9-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        return key.length > 0 ? key : 'unknown';
     }
 
     function statusBadgeHtml(status) {
-        return '<span class="badge ' + statusBadgeClass(status) + '">' + escapeHtml(status) + '</span>';
+        var key = statusBadgeKey(status);
+        return '<span class="badge status-badge status-badge-' + key + '">' + escapeHtml(status) + '</span>';
     }
 
     function fmt4(value) {

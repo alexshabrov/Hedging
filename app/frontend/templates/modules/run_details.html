@@ -19,14 +19,14 @@
                 <div class="card">
                     <div class="card-header">Run {{ details.position.run_id }}</div>
                     <div class="card-body">
-                        <form method="POST" action="/runs/{{ details.position.run_id }}/stop" onsubmit="return confirm('Stop this run?');">
+                        <form method="POST" action="/runs/{{ details.position.run_id }}/stop" onsubmit="return confirm('Stop this run?');" style="display:inline;">
                             <span id="run-stop-wrap" {% if details.position.status not in ['initialized', 'running', 'stopping'] %}style="display:none;"{% endif %}>
-                                <button type="submit" class="btn btn-danger btn-sm">Stop run</button>
+                                <button type="submit" class="btn btn-danger btn-sm mr-1">Stop run</button>
                             </span>
                         </form>
                         <form method="POST" action="/runs/{{ details.position.run_id }}/collect" onsubmit="return confirm('Collect fees to wallet for this failed run?');" style="display:inline;">
                             <span id="run-collect-wrap" {% if details.position.status != 'failed' or details.position.token_id is none %}style="display:none;"{% endif %}>
-                                <button type="submit" class="btn btn-warning btn-sm">Collect</button>
+                                <button type="submit" class="btn btn-warning btn-sm mr-1">Collect</button>
                             </span>
                         </form>
                         <a href="/positions" class="btn btn-secondary btn-sm">Back to positions</a>
