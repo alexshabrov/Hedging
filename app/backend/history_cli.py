@@ -83,10 +83,11 @@ NETWORK_UNISWAP_ROUTERS: Dict[str, List[str]] = {
     ],
 }
 
-TRANSFER_TOPIC = Web3.keccak(text='Transfer(address,address,uint256)').hex()
-INCREASE_LIQ_TOPIC = Web3.keccak(text='IncreaseLiquidity(uint256,uint128,uint256,uint256)').hex()
-DECREASE_LIQ_TOPIC = Web3.keccak(text='DecreaseLiquidity(uint256,uint128,uint256,uint256)').hex()
-COLLECT_TOPIC = Web3.keccak(text='Collect(uint256,address,uint256,uint256)').hex()
+TRANSFER_TOPIC = Web3.to_hex(Web3.keccak(text='Transfer(address,address,uint256)'))
+INCREASE_LIQ_TOPIC = Web3.to_hex(Web3.keccak(text='IncreaseLiquidity(uint256,uint128,uint256,uint256)'))
+DECREASE_LIQ_TOPIC = Web3.to_hex(Web3.keccak(text='DecreaseLiquidity(uint256,uint128,uint256,uint256)'))
+COLLECT_TOPIC = Web3.to_hex(Web3.keccak(text='Collect(uint256,address,uint256,uint256)'))
+POOL_SWAP_TOPIC = Web3.to_hex(Web3.keccak(text='Swap(address,address,int256,int256,uint160,uint128,int24)'))
 
 
 ### Enums ###
@@ -209,6 +210,76 @@ class AlchemyTransferPage(StrictModel):
         )
 
 
+class AlchemyTxRef(StrictModel):
+    block_num: str
+    tx_hash: str
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'AlchemyTxRef':
+        if data is None:
+            raise RuntimeError('AlchemyTxRef.from_dict: data is None')
+        if not isinstance(data, dict):
+            raise RuntimeError(f'AlchemyTxRef.from_dict: data is not dict: {type(data)}')
+        if 'blockNum' not in data:
+            raise RuntimeError('AlchemyTxRef.from_dict: blockNum is missing')
+        if 'hash' not in data:
+            raise RuntimeError('AlchemyTxRef.from_dict: hash is missing')
+
+        return cls(
+            block_num=str(data['blockNum']),
+            tx_hash=str(data['hash']),
+        )
+
+
+class AlchemyTxRefPage(StrictModel):
+    transfers: List[AlchemyTxRef]
+    page_key: Optional[str]
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'AlchemyTxRefPage':
+        if data is None:
+            raise RuntimeError('AlchemyTxRefPage.from_dict: data is None')
+        if not isinstance(data, dict):
+            raise RuntimeError(f'AlchemyTxRefPage.from_dict: data is not dict: {type(data)}')
+        if 'transfers' not in data:
+            raise RuntimeError('AlchemyTxRefPage.from_dict: transfers is missing')
+
+        raw_transfers = data['transfers']
+        if not isinstance(raw_transfers, list):
+            raise RuntimeError(f'AlchemyTxRefPage.from_dict: transfers is not list: {type(raw_transfers)}')
+
+        transfers: List[AlchemyTxRef] = []
+        for raw_item in raw_transfers:
+            transfers.append(AlchemyTxRef.from_dict(raw_item))
+
+        page_key = None
+        if 'pageKey' in data and data['pageKey'] is not None:
+            page_key = str(data['pageKey'])
+
+        return cls(
+            transfers=transfers,
+            page_key=page_key,
+        )
+
+
+class LpTokenMove(StrictModel):
+    token_id: int
+    weth: float
+    usdc: float
+
+
+class PendingPrincipal(StrictModel):
+    weth: float
+    usdc: float
+
+
+class TokenLpSums(StrictModel):
+    increase_weth: float
+    increase_usdc: float
+    decrease_weth: float
+    decrease_usdc: float
+
+
 class HistoryTx(StrictModel):
     tx_hash: str
     block_number: int
@@ -224,6 +295,9 @@ class HistoryTx(StrictModel):
     decrease_usdc: float
     collect_weth: float
     collect_usdc: float
+    increase_moves: List[LpTokenMove]
+    decrease_moves: List[LpTokenMove]
+    collect_moves: List[LpTokenMove]
 
 
 class PnlBreakdown(StrictModel):
@@ -320,6 +394,10 @@ def _to_float_token(raw: int, decimals: int) -> float:
     return float(int(raw)) / float(10 ** int(decimals))
 
 
+def _to_quote_pnl(base_delta: float, quote_delta: float, base_price: float) -> float:
+    return float(base_delta) * float(base_price) + float(quote_delta)
+
+
 def _topic_to_address(topic_hex: str) -> str:
     if not isinstance(topic_hex, str):
         raise RuntimeError(f'topic is not str: {type(topic_hex)}')
@@ -329,6 +407,23 @@ def _topic_to_address(topic_hex: str) -> str:
         raise RuntimeError(f'topic length is invalid: {topic_hex}')
 
     return Web3.to_checksum_address('0x' + topic_hex[-40:])
+
+
+def _topic_to_uint256(topic_obj) -> int:
+    topic_hex = Web3.to_hex(topic_obj)
+    if not isinstance(topic_hex, str):
+        raise RuntimeError(f'topic_hex is not str: {type(topic_hex)}')
+    if not topic_hex.startswith('0x'):
+        raise RuntimeError(f'topic has no 0x prefix: {topic_hex}')
+    if len(topic_hex) != 66:
+        raise RuntimeError(f'topic length is invalid: {topic_hex}')
+    return int(topic_hex, 16)
+
+
+def _map_pool_amounts_to_weth_usdc(amount0_raw: int, amount1_raw: int, token0_lc: str, weth_address_lc: str) -> Tuple[int, int]:
+    if str(token0_lc) == str(weth_address_lc):
+        return int(amount0_raw), int(amount1_raw)
+    return int(amount1_raw), int(amount0_raw)
 
 
 def _rpc_call(rpc_url: str, method: str, params: List, request_id: int):
@@ -399,6 +494,44 @@ def _alchemy_list_transfers(rpc_url: str, logger, wallet_address: str, token_add
         all_items.extend(page.transfers)
 
         logger.info(f'alchemy_list_transfers direction={direction} token={token_address} loaded={len(page.transfers)} total={len(all_items)}')
+
+        if page.page_key is None:
+            break
+
+        page_key = str(page.page_key)
+
+    return all_items
+
+
+def _alchemy_list_tx_refs(rpc_url: str, logger, params_obj: Dict, log_tag: str) -> List[AlchemyTxRef]:
+    if params_obj is None:
+        raise RuntimeError('params_obj is None')
+    if not isinstance(params_obj, dict):
+        raise RuntimeError(f'params_obj is not dict: {type(params_obj)}')
+    if not isinstance(log_tag, str) or len(log_tag) == 0:
+        raise RuntimeError('log_tag is empty')
+
+    all_items: List[AlchemyTxRef] = []
+    page_key = None
+    req_id = 50_000
+
+    while True:
+        if page_key is not None:
+            params_obj['pageKey'] = str(page_key)
+        elif 'pageKey' in params_obj:
+            del params_obj['pageKey']
+
+        result = _rpc_call(
+            rpc_url=str(rpc_url),
+            method='alchemy_getAssetTransfers',
+            params=[params_obj],
+            request_id=int(req_id),
+        )
+        req_id += 1
+
+        page = AlchemyTxRefPage.from_dict(result)
+        all_items.extend(page.transfers)
+        logger.info(f'{log_tag} loaded={len(page.transfers)} total={len(all_items)}')
 
         if page.page_key is None:
             break
@@ -488,21 +621,34 @@ def _collect_candidate_hashes_alchemy(rpc_url: str, logger, wallet_address: str,
         for item in to_items:
             hashes.add(str(item.tx_hash))
 
+    wallet_checksum = Web3.to_checksum_address(str(wallet_address))
+    external_params = {
+        'category': ['external'],
+        'fromAddress': str(wallet_checksum),
+        'fromBlock': str(from_block_hex),
+        'toBlock': str(to_block_hex),
+        'withMetadata': False,
+        'excludeZeroValue': False,
+        'maxCount': hex(int(page_size)),
+    }
+    external_items = _alchemy_list_tx_refs(
+        rpc_url=str(rpc_url),
+        logger=logger,
+        params_obj=external_params,
+        log_tag='alchemy_list_external_wallet_txs',
+    )
+    for item in external_items:
+        hashes.add(str(item.tx_hash))
+
     out = list(hashes)
     out.sort()
     logger.info(f'alchemy_candidate_hashes_loaded n={len(out)}')
     return out
 
 
-def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wallet_lc: str, npm_lc: str, router_lc_set: Set[str], token0_lc: str, weth_token: TokenMeta, usdc_token: TokenMeta) -> Optional[HistoryTx]:
+def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wallet_lc: str, npm_lc: str, router_lc_set: Set[str], pool_lc: str, token0_lc: str, weth_token: TokenMeta, usdc_token: TokenMeta) -> Optional[HistoryTx]:
     tx = w3.eth.get_transaction(str(tx_hash))
     receipt = w3.eth.get_transaction_receipt(str(tx_hash))
-
-    if 'from' not in tx:
-        raise RuntimeError(f'tx has no from field: {tx_hash}')
-
-    if str(tx['from']).lower() != str(wallet_lc):
-        return None
 
     if 'blockNumber' not in receipt:
         raise RuntimeError(f'receipt has no blockNumber: {tx_hash}')
@@ -517,11 +663,15 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
     timestamp_ms = int(block_ts_cache[int(block_number)])
     tx_to = tx['to']
     tx_to_lc = '' if tx_to is None else str(tx_to).lower()
-    is_uniswap_swap = str(tx_to_lc) in router_lc_set
+    is_uniswap_swap = False
 
     gas_used = _hex_to_int(receipt['gasUsed'])
     gas_price = _hex_to_int(receipt['effectiveGasPrice'])
     gas_eth = float(int(gas_used) * int(gas_price)) / float(10 ** 18)
+
+    weth_address_lc = str(weth_token.address).lower()
+    weth_decimals = int(weth_token.decimals)
+    usdc_decimals = int(usdc_token.decimals)
 
     weth_delta_raw = 0
     usdc_delta_raw = 0
@@ -531,6 +681,10 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
     decrease1_raw = 0
     collect0_raw = 0
     collect1_raw = 0
+
+    increase_moves: List[LpTokenMove] = []
+    decrease_moves: List[LpTokenMove] = []
+    collect_moves: List[LpTokenMove] = []
 
     if 'logs' not in receipt:
         raise RuntimeError(f'receipt has no logs: {tx_hash}')
@@ -573,19 +727,81 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
 
         if str(log_addr_lc) == str(npm_lc):
             if str(topic0) == str(INCREASE_LIQ_TOPIC).lower():
+                if len(topics) < 2:
+                    raise RuntimeError(f'IncreaseLiquidity log has <2 topics: {tx_hash}')
+                token_id = int(_topic_to_uint256(topics[1]))
                 vals = _decode_uints_from_data(Web3.to_hex(log['data']), 3)
-                increase0_raw += int(vals[1])
-                increase1_raw += int(vals[2])
+                amount0_raw = int(vals[1])
+                amount1_raw = int(vals[2])
+                increase0_raw += int(amount0_raw)
+                increase1_raw += int(amount1_raw)
+
+                inc_weth_raw, inc_usdc_raw = _map_pool_amounts_to_weth_usdc(
+                    amount0_raw=int(amount0_raw),
+                    amount1_raw=int(amount1_raw),
+                    token0_lc=str(token0_lc),
+                    weth_address_lc=str(weth_address_lc),
+                )
+                increase_moves.append(
+                    LpTokenMove(
+                        token_id=int(token_id),
+                        weth=float(_to_float_token(int(inc_weth_raw), int(weth_decimals))),
+                        usdc=float(_to_float_token(int(inc_usdc_raw), int(usdc_decimals))),
+                    )
+                )
 
             if str(topic0) == str(DECREASE_LIQ_TOPIC).lower():
+                if len(topics) < 2:
+                    raise RuntimeError(f'DecreaseLiquidity log has <2 topics: {tx_hash}')
+                token_id = int(_topic_to_uint256(topics[1]))
                 vals = _decode_uints_from_data(Web3.to_hex(log['data']), 3)
-                decrease0_raw += int(vals[1])
-                decrease1_raw += int(vals[2])
+                amount0_raw = int(vals[1])
+                amount1_raw = int(vals[2])
+                decrease0_raw += int(amount0_raw)
+                decrease1_raw += int(amount1_raw)
+
+                dec_weth_raw, dec_usdc_raw = _map_pool_amounts_to_weth_usdc(
+                    amount0_raw=int(amount0_raw),
+                    amount1_raw=int(amount1_raw),
+                    token0_lc=str(token0_lc),
+                    weth_address_lc=str(weth_address_lc),
+                )
+                decrease_moves.append(
+                    LpTokenMove(
+                        token_id=int(token_id),
+                        weth=float(_to_float_token(int(dec_weth_raw), int(weth_decimals))),
+                        usdc=float(_to_float_token(int(dec_usdc_raw), int(usdc_decimals))),
+                    )
+                )
 
             if str(topic0) == str(COLLECT_TOPIC).lower():
-                vals = _decode_uints_from_data(Web3.to_hex(log['data']), 2)
-                collect0_raw += int(vals[0])
-                collect1_raw += int(vals[1])
+                if len(topics) < 2:
+                    raise RuntimeError(f'Collect log has <2 topics: {tx_hash}')
+                token_id = int(_topic_to_uint256(topics[1]))
+                # NPM Collect event data layout:
+                # [recipient(address padded to 32 bytes), amount0(uint256), amount1(uint256)]
+                vals = _decode_uints_from_data(Web3.to_hex(log['data']), 3)
+                amount0_raw = int(vals[1])
+                amount1_raw = int(vals[2])
+                collect0_raw += int(amount0_raw)
+                collect1_raw += int(amount1_raw)
+
+                col_weth_raw, col_usdc_raw = _map_pool_amounts_to_weth_usdc(
+                    amount0_raw=int(amount0_raw),
+                    amount1_raw=int(amount1_raw),
+                    token0_lc=str(token0_lc),
+                    weth_address_lc=str(weth_address_lc),
+                )
+                collect_moves.append(
+                    LpTokenMove(
+                        token_id=int(token_id),
+                        weth=float(_to_float_token(int(col_weth_raw), int(weth_decimals))),
+                        usdc=float(_to_float_token(int(col_usdc_raw), int(usdc_decimals))),
+                    )
+                )
+
+        if str(log_addr_lc) == str(pool_lc) and str(topic0) == str(POOL_SWAP_TOPIC).lower():
+            is_uniswap_swap = True
 
     increase_weth_raw = int(increase0_raw) if str(token0_lc) == str(weth_token.address).lower() else int(increase1_raw)
     increase_usdc_raw = int(increase1_raw) if str(token0_lc) == str(weth_token.address).lower() else int(increase0_raw)
@@ -597,6 +813,10 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
     has_add = int(increase_weth_raw) > 0 or int(increase_usdc_raw) > 0
     has_remove = int(decrease_weth_raw) > 0 or int(decrease_usdc_raw) > 0
     has_collect = int(collect_weth_raw) > 0 or int(collect_usdc_raw) > 0
+    has_wallet_delta = int(weth_delta_raw) != 0 or int(usdc_delta_raw) != 0
+
+    if (not bool(is_uniswap_swap)) and str(tx_to_lc) in router_lc_set and bool(has_wallet_delta):
+        is_uniswap_swap = True
 
     kind = TxKind.OTHER
     if bool(is_uniswap_swap):
@@ -607,6 +827,9 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
         kind = TxKind.REMOVE
     elif bool(has_collect):
         kind = TxKind.COLLECT
+
+    if (not bool(has_wallet_delta)) and (not bool(has_add)) and (not bool(has_remove)) and (not bool(has_collect)) and (not bool(is_uniswap_swap)):
+        return None
 
     return HistoryTx(
         tx_hash=str(tx_hash),
@@ -623,12 +846,16 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
         decrease_usdc=float(_to_float_token(decrease_usdc_raw, usdc_token.decimals)),
         collect_weth=float(_to_float_token(collect_weth_raw, weth_token.decimals)),
         collect_usdc=float(_to_float_token(collect_usdc_raw, usdc_token.decimals)),
+        increase_moves=increase_moves,
+        decrease_moves=decrease_moves,
+        collect_moves=collect_moves,
     )
 
 
-def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: TokenMeta, tx_hashes: List[str], npm_address: str, router_set: Set[str], token0_address: str, eth_price: float) -> HistoryReport:
+def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: TokenMeta, tx_hashes: List[str], npm_address: str, router_set: Set[str], pool_address: str, token0_address: str, eth_price: float) -> HistoryReport:
     wallet_lc = str(args.wallet_address).lower()
     npm_lc = str(npm_address).lower()
+    pool_lc = str(pool_address).lower()
     token0_lc = str(token0_address).lower()
     block_ts_cache: Dict[int, int] = {}
     txs: List[HistoryTx] = []
@@ -641,6 +868,7 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
             wallet_lc=str(wallet_lc),
             npm_lc=str(npm_lc),
             router_lc_set=router_set,
+            pool_lc=str(pool_lc),
             token0_lc=str(token0_lc),
             weth_token=weth_token,
             usdc_token=usdc_token,
@@ -673,24 +901,111 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
     delta_weth = float(end_weth) - float(start_weth)
     delta_usdc = float(end_usdc) - float(start_usdc)
 
-    sum_increase_weth = 0.0
-    sum_increase_usdc = 0.0
-    sum_decrease_weth = 0.0
-    sum_decrease_usdc = 0.0
-    sum_collect_weth = 0.0
-    sum_collect_usdc = 0.0
     sum_swap_weth = 0.0
     sum_swap_usdc = 0.0
     sum_gas_eth = 0.0
+    sum_fee_weth = 0.0
+    sum_fee_usdc = 0.0
     n_swaps = 0
+    pending_principal_by_token: Dict[int, PendingPrincipal] = {}
+    lp_sums_by_token: Dict[int, TokenLpSums] = {}
 
     for tx in txs:
-        sum_increase_weth += float(tx.increase_weth)
-        sum_increase_usdc += float(tx.increase_usdc)
-        sum_decrease_weth += float(tx.decrease_weth)
-        sum_decrease_usdc += float(tx.decrease_usdc)
-        sum_collect_weth += float(tx.collect_weth)
-        sum_collect_usdc += float(tx.collect_usdc)
+        for inc_move in tx.increase_moves:
+            token_id = int(inc_move.token_id)
+            if token_id in lp_sums_by_token:
+                prev = lp_sums_by_token[token_id]
+                lp_sums_by_token[token_id] = TokenLpSums(
+                    increase_weth=float(prev.increase_weth) + float(inc_move.weth),
+                    increase_usdc=float(prev.increase_usdc) + float(inc_move.usdc),
+                    decrease_weth=float(prev.decrease_weth),
+                    decrease_usdc=float(prev.decrease_usdc),
+                )
+            else:
+                lp_sums_by_token[token_id] = TokenLpSums(
+                    increase_weth=float(inc_move.weth),
+                    increase_usdc=float(inc_move.usdc),
+                    decrease_weth=0.0,
+                    decrease_usdc=0.0,
+                )
+
+        for dec_move in tx.decrease_moves:
+            token_id = int(dec_move.token_id)
+            if token_id in lp_sums_by_token:
+                prev = lp_sums_by_token[token_id]
+                lp_sums_by_token[token_id] = TokenLpSums(
+                    increase_weth=float(prev.increase_weth),
+                    increase_usdc=float(prev.increase_usdc),
+                    decrease_weth=float(prev.decrease_weth) + float(dec_move.weth),
+                    decrease_usdc=float(prev.decrease_usdc) + float(dec_move.usdc),
+                )
+            else:
+                lp_sums_by_token[token_id] = TokenLpSums(
+                    increase_weth=0.0,
+                    increase_usdc=0.0,
+                    decrease_weth=float(dec_move.weth),
+                    decrease_usdc=float(dec_move.usdc),
+                )
+
+            if token_id in pending_principal_by_token:
+                prev = pending_principal_by_token[token_id]
+                pending_principal_by_token[token_id] = PendingPrincipal(
+                    weth=float(prev.weth) + float(dec_move.weth),
+                    usdc=float(prev.usdc) + float(dec_move.usdc),
+                )
+            else:
+                pending_principal_by_token[token_id] = PendingPrincipal(
+                    weth=float(dec_move.weth),
+                    usdc=float(dec_move.usdc),
+                )
+
+        for col_move in tx.collect_moves:
+            token_id = int(col_move.token_id)
+            pending = PendingPrincipal(weth=0.0, usdc=0.0)
+            if token_id in pending_principal_by_token:
+                pending = pending_principal_by_token[token_id]
+
+            principal_weth = float(pending.weth)
+            if float(principal_weth) > float(col_move.weth):
+                principal_weth = float(col_move.weth)
+
+            principal_usdc = float(pending.usdc)
+            if float(principal_usdc) > float(col_move.usdc):
+                principal_usdc = float(col_move.usdc)
+
+            fee_weth = float(col_move.weth) - float(principal_weth)
+            fee_usdc = float(col_move.usdc) - float(principal_usdc)
+
+            if float(fee_weth) < -1e-12:
+                raise RuntimeError(f'fee_weth < 0 for token_id={token_id}: {fee_weth}')
+            if float(fee_usdc) < -1e-12:
+                raise RuntimeError(f'fee_usdc < 0 for token_id={token_id}: {fee_usdc}')
+
+            if float(fee_weth) < 0.0:
+                fee_weth = 0.0
+            if float(fee_usdc) < 0.0:
+                fee_usdc = 0.0
+
+            pending_weth = float(pending.weth) - float(principal_weth)
+            pending_usdc = float(pending.usdc) - float(principal_usdc)
+
+            if float(pending_weth) < -1e-12:
+                raise RuntimeError(f'pending_weth < 0 for token_id={token_id}: {pending_weth}')
+            if float(pending_usdc) < -1e-12:
+                raise RuntimeError(f'pending_usdc < 0 for token_id={token_id}: {pending_usdc}')
+
+            if float(pending_weth) < 0.0:
+                pending_weth = 0.0
+            if float(pending_usdc) < 0.0:
+                pending_usdc = 0.0
+
+            pending_principal_by_token[token_id] = PendingPrincipal(
+                weth=float(pending_weth),
+                usdc=float(pending_usdc),
+            )
+
+            sum_fee_weth += float(fee_weth)
+            sum_fee_usdc += float(fee_usdc)
 
         if tx.kind == TxKind.SWAP:
             n_swaps += 1
@@ -700,16 +1015,29 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
         if tx.kind == TxKind.ADD or tx.kind == TxKind.REMOVE or tx.kind == TxKind.SWAP:
             sum_gas_eth += float(tx.gas_eth)
 
-    fees_weth = float(sum_collect_weth) - float(sum_decrease_weth)
-    fees_usdc = float(sum_collect_usdc) - float(sum_decrease_usdc)
-    il_weth = float(sum_decrease_weth) - float(sum_increase_weth)
-    il_usdc = float(sum_decrease_usdc) - float(sum_increase_usdc)
+    realized_il_weth = 0.0
+    realized_il_usdc = 0.0
+    for token_id in lp_sums_by_token:
+        item = lp_sums_by_token[token_id]
+        # Realized IL only for positions that had at least one decrease.
+        if float(item.decrease_weth) == 0.0 and float(item.decrease_usdc) == 0.0:
+            continue
+        realized_il_weth += float(item.decrease_weth) - float(item.increase_weth)
+        realized_il_usdc += float(item.decrease_usdc) - float(item.increase_usdc)
+
+    fees_weth = float(sum_fee_weth)
+    fees_usdc = float(sum_fee_usdc)
+    il_weth = float(realized_il_weth)
+    il_usdc = float(realized_il_usdc)
     gas_usdc = float(sum_gas_eth) * float(eth_price)
+    fees_quote = _to_quote_pnl(float(fees_weth), float(fees_usdc), float(eth_price))
+    il_quote = _to_quote_pnl(float(il_weth), float(il_usdc), float(eth_price))
+    swaps_quote = _to_quote_pnl(float(sum_swap_weth), float(sum_swap_usdc), float(eth_price))
 
     pnl_by_components = (
-        float(fees_usdc) + float(fees_weth) * float(eth_price)
-        + float(il_usdc) + float(il_weth) * float(eth_price)
-        + float(sum_swap_usdc) + float(sum_swap_weth) * float(eth_price)
+        float(fees_quote)
+        + float(il_quote)
+        + float(swaps_quote)
         - float(gas_usdc)
     )
     pnl_by_balances = (
@@ -852,6 +1180,7 @@ def main() -> None:
         tx_hashes=tx_hashes,
         npm_address=str(npm_address),
         router_set=router_lc_set,
+        pool_address=str(pool_checksum),
         token0_address=str(token0.address),
         eth_price=float(eth_price),
     )
@@ -867,21 +1196,34 @@ def main() -> None:
 
     print('=== TRANSACTIONS ===')
     for idx, tx in enumerate(report.analyzed_transactions, start=1):
-        tx_pnl_usdc = float(tx.usdc_delta) + float(tx.weth_delta) * float(report.eth_price_usdt) - float(tx.gas_eth) * float(report.eth_price_usdt)
         print(f'[{idx}] block={tx.block_number} ts_ms={tx.timestamp_ms} kind={tx.kind.value} swap={int(tx.is_uniswap_swap)}')
         print(f'    tx={tx.tx_hash}')
         print(f'    delta:   WETH={tx.weth_delta:.8f} USDC={tx.usdc_delta:.8f}')
         print(f'    pool io: in(WETH={tx.increase_weth:.8f}, USDC={tx.increase_usdc:.8f}) out(WETH={tx.decrease_weth:.8f}, USDC={tx.decrease_usdc:.8f}) collect(WETH={tx.collect_weth:.8f}, USDC={tx.collect_usdc:.8f})')
         print(f'    gas:     ETH={tx.gas_eth:.8f} USDC={float(tx.gas_eth) * float(report.eth_price_usdt):.8f}')
-        print(f'    tx pnl (USDC, delta-gas): {tx_pnl_usdc:.8f}')
+        if tx.kind == TxKind.SWAP:
+            tx_pnl_usdc = float(tx.usdc_delta) + float(tx.weth_delta) * float(report.eth_price_usdt) - float(tx.gas_eth) * float(report.eth_price_usdt)
+            print(f'    tx pnl (USDC, swap only): {tx_pnl_usdc:.8f}')
+        else:
+            print('    tx pnl: N/A (not a swap; inventory move/event)')
         print('')
 
     print('=== SUMMARY ===')
     print(f'WETH start/end: {report.balances.start_weth:.8f} -> {report.balances.end_weth:.8f} (delta {report.balances.delta_weth:.8f})')
     print(f'USDC start/end: {report.balances.start_usdc:.8f} -> {report.balances.end_usdc:.8f} (delta {report.balances.delta_usdc:.8f})')
     print('')
-    print(f'Fees from pool: WETH={report.pnl.fees.weth:.8f}, USDC={report.pnl.fees.usdc:.8f}')
-    print(f'Realized IL:    WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f}')
+    realized_il_pnl_usdc = _to_quote_pnl(
+        base_delta=float(report.pnl.realized_il.weth),
+        quote_delta=float(report.pnl.realized_il.usdc),
+        base_price=float(report.eth_price_usdt),
+    )
+    fees_pnl_usdc = _to_quote_pnl(
+        base_delta=float(report.pnl.fees.weth),
+        quote_delta=float(report.pnl.fees.usdc),
+        base_price=float(report.eth_price_usdt),
+    )
+    print(f'Fees from pool: WETH={report.pnl.fees.weth:.8f}, USDC={report.pnl.fees.usdc:.8f}, PnL(USDC)={fees_pnl_usdc:.8f}')
+    print(f'Realized IL:    WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f}, PnL(USDC)={realized_il_pnl_usdc:.8f}')
     print(f'Uniswap swaps:  WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
     print(f'Gas (add/remove/rebalance): ETH={report.pnl.gas_eth:.8f}, USDC={report.pnl.gas_usdc:.8f}')
     print('')
