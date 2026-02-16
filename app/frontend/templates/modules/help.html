@@ -1,0 +1,354 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper help-page">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Help: показатели и формулы</div>
+                    <div class="card-body">
+                        <style>
+                            .help-page .help-table {
+                                width: 100%;
+                                table-layout: fixed;
+                            }
+
+                            .help-page .help-2 th:nth-child(1),
+                            .help-page .help-2 td:nth-child(1) {
+                                width: 34%;
+                            }
+
+                            .help-page .help-2 th:nth-child(2),
+                            .help-page .help-2 td:nth-child(2) {
+                                width: 66%;
+                            }
+
+                            .help-page .help-3 th:nth-child(1),
+                            .help-page .help-3 td:nth-child(1) {
+                                width: 24%;
+                            }
+
+                            .help-page .help-3 th:nth-child(2),
+                            .help-page .help-3 td:nth-child(2) {
+                                width: 38%;
+                            }
+
+                            .help-page .help-3 th:nth-child(3),
+                            .help-page .help-3 td:nth-child(3) {
+                                width: 38%;
+                            }
+
+                            .help-page code {
+                                white-space: normal;
+                                word-break: break-word;
+                            }
+                        </style>
+
+                        <p class="mb-2">
+                            На этой странице собраны все ключевые метрики интерфейса и их формулы в пользовательском виде.
+                        </p>
+                        <p class="mb-4">
+                            Все PnL в quote-валюте (например, USDC/USDT), все APR в процентах годовых (%).
+                        </p>
+
+                        <h5>1) Обозначения</h5>
+                        <table class="table table-sm table-bordered help-table help-2">
+                            <tbody>
+                                <tr><th>Total quote (Q)</th><td>Общий объём капитала позиции в quote-валюте.</td></tr>
+                                <tr><th>PnL quote</th><td>Прибыль/убыток в quote-валюте.</td></tr>
+                                <tr><th>HoldSec (T)</th><td>Время удержания позиции в секундах.</td></tr>
+                                <tr><th>SecondsPerYear</th><td>31,536,000 (365 * 24 * 60 * 60).</td></tr>
+                                <tr><th>base_price</th><td>Базовая цена пары для пересчёта base в quote.</td></tr>
+                                <tr><th>open_filled_quote_units</th><td>Объём в quote-единицах, фактически захеджированный при открытии.</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5>2) Базовые формулы</h5>
+                        <table class="table table-sm table-bordered help-table help-2">
+                            <tbody>
+                                <tr>
+                                    <th>APR (%)</th>
+                                    <td><code>(PnL_quote / Q) * (31,536,000 / T) * 100</code></td>
+                                </tr>
+                                <tr>
+                                    <th>PnL (%)</th>
+                                    <td><code>(PnL_quote / Q) * 100</code></td>
+                                </tr>
+                                <tr>
+                                    <th>Runtime (sec)</th>
+                                    <td><code>(finished_at_ms - started_at_ms) / 1000</code></td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>3) Что такое операционные издержки (Costs)</h5>
+                        <table class="table table-sm table-bordered help-table help-3">
+                            <thead>
+                                <tr>
+                                    <th>Показатель</th>
+                                    <th>Формула</th>
+                                    <th>Что означает</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Costs quote</td>
+                                    <td><code>costs_quote = gas_paid_quote + swap_cost_quote</code></td>
+                                    <td>Полные операционные издержки итерации в quote.</td>
+                                </tr>
+                                <tr>
+                                    <td>Gas paid quote</td>
+                                    <td><code>gas_paid_quote = gas_paid_eth * base_price</code></td>
+                                    <td>Пересчёт on-chain gas из ETH в quote.</td>
+                                </tr>
+                                <tr>
+                                    <td>Gas paid eth</td>
+                                    <td><code>gas_mint_eth + gas_decrease_eth + gas_collect_eth</code></td>
+                                    <td>Сумма gas по mint/decrease/collect.</td>
+                                </tr>
+                                <tr>
+                                    <td>Swap cost quote</td>
+                                    <td><code>rebalance_fee_quote</code> (если есть rebalance order), иначе <code>0</code></td>
+                                    <td>Комиссия исполнения ребаланса.</td>
+                                </tr>
+                                <tr>
+                                    <td>Total costs quote (Dashboard)</td>
+                                    <td><code>sum(costs_quote)</code></td>
+                                    <td>Сумма операционных издержек по всем run.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>4) Декомпозиция PnL на итерации</h5>
+                        <table class="table table-sm table-bordered help-table help-3">
+                            <thead>
+                                <tr>
+                                    <th>Показатель</th>
+                                    <th>Формула</th>
+                                    <th>Что означает</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>DEX price PnL</td>
+                                    <td>
+                                        <code>
+                                            dex_realized_il_quote = (decrease_quote + decrease_base * base_price) - (mint_quote + mint_base * base_price)
+                                        </code>
+                                    </td>
+                                    <td>Результат ценового движения LP-позиции.</td>
+                                </tr>
+                                <tr>
+                                    <td>Fees received quote</td>
+                                    <td>
+                                        <code>
+                                            (collect_quote - decrease_quote) + (collect_base - decrease_base) * base_price
+                                        </code>
+                                    </td>
+                                    <td>Чистые LP-комиссии сверх возвращённого principal.</td>
+                                </tr>
+                                <tr>
+                                    <td>CEX PnL quote</td>
+                                    <td>
+                                        <code>
+                                            cex_pnl_quote = (realized_pnl_quote_units + unrealized_pnl_quote_units) * (hedge_quote / open_filled_quote_units)
+                                        </code>
+                                    </td>
+                                    <td>PnL хеджа на CEX, пересчитанный в quote.</td>
+                                </tr>
+                                <tr>
+                                    <td>PnL without hedge</td>
+                                    <td><code>pnl_without_hedge_quote = dex_realized_il_quote + fees_received_quote - costs_quote</code></td>
+                                    <td>Итог итерации без учёта результата CEX-хеджа.</td>
+                                </tr>
+                                <tr>
+                                    <td>PnL with hedge</td>
+                                    <td><code>pnl_with_hedge_quote = pnl_without_hedge_quote + cex_pnl_quote</code></td>
+                                    <td>Полный итог итерации с хеджем.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>5) Dashboard</h5>
+                        <table class="table table-sm table-bordered help-table help-3">
+                            <thead>
+                                <tr>
+                                    <th>Показатель</th>
+                                    <th>Формула</th>
+                                    <th>Что означает</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Active runs</td>
+                                    <td>Количество run со статусом initialized/running/stopping</td>
+                                    <td>Сколько запусков сейчас в работе.</td>
+                                </tr>
+                                <tr>
+                                    <td>Finished iterations</td>
+                                    <td><code>sum(iterations_finished)</code></td>
+                                    <td>Сумма завершённых итераций по всем run.</td>
+                                </tr>
+                                <tr>
+                                    <td>Total PnL with hedge</td>
+                                    <td><code>sum(pnl_with_hedge_quote)</code></td>
+                                    <td>Итоговый PnL с учётом hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>Total PnL without hedge</td>
+                                    <td><code>sum(pnl_without_hedge_quote)</code></td>
+                                    <td>Итоговый PnL без учёта hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>Total costs quote</td>
+                                    <td><code>sum(costs_quote)</code></td>
+                                    <td>Суммарные издержки.</td>
+                                </tr>
+                                <tr>
+                                    <td>APR with hedge (%)</td>
+                                    <td><code>sum(apr_with_hedge_pct * total_quote) / sum(total_quote)</code></td>
+                                    <td>Взвешенный APR с hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>APR without hedge (%)</td>
+                                    <td><code>sum(apr_without_hedge_pct * total_quote) / sum(total_quote)</code></td>
+                                    <td>Взвешенный APR без hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>Average APR per run (%)</td>
+                                    <td><code>sum(apr_with_hedge_pct) / N</code></td>
+                                    <td>Простой средний APR по запускам (без взвешивания на капитал).</td>
+                                </tr>
+                                <tr>
+                                    <td>Average iteration lifetime (sec)</td>
+                                    <td><code>sum(avg_iteration_lifetime_sec where &gt; 0) / N_positive</code></td>
+                                    <td>Средняя длительность итерации по run с валидным временем.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>6) Positions</h5>
+                        <table class="table table-sm table-bordered help-table help-3">
+                            <thead>
+                                <tr>
+                                    <th>Показатель</th>
+                                    <th>Формула</th>
+                                    <th>Что означает</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>PnL with hedge</td>
+                                    <td><code>pnl_with_hedge_quote</code> и <code>(pnl_with_hedge_quote / total_quote) * 100</code></td>
+                                    <td>Доходность с учётом hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>PnL without hedge</td>
+                                    <td><code>pnl_without_hedge_quote</code> и <code>(pnl_without_hedge_quote / total_quote) * 100</code></td>
+                                    <td>Доходность без hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>Fees</td>
+                                    <td><code>fees_quote</code></td>
+                                    <td>Сумма собранных комиссий LP.</td>
+                                </tr>
+                                <tr>
+                                    <td>Price PnL</td>
+                                    <td><code>price_pnl_quote</code></td>
+                                    <td>Результат от ценового движения в LP-части.</td>
+                                </tr>
+                                <tr>
+                                    <td>Hedge PnL</td>
+                                    <td><code>hedge_pnl_quote</code></td>
+                                    <td>Результат хеджа на CEX.</td>
+                                </tr>
+                                <tr>
+                                    <td>Costs</td>
+                                    <td><code>costs_quote = sum(costs_quote по итерациям run)</code></td>
+                                    <td>Операционные издержки run (газ + комиссия ребаланса).</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>7) Run details: PnL-лестница</h5>
+                        <table class="table table-sm table-bordered help-table help-2">
+                            <thead>
+                                <tr>
+                                    <th>Показатель</th>
+                                    <th>Формула</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>PnL: fees</td>
+                                    <td><code>fees_received_quote</code></td>
+                                </tr>
+                                <tr>
+                                    <td>PnL: fees + il</td>
+                                    <td><code>fees_received_quote + dex_realized_il_quote</code></td>
+                                </tr>
+                                <tr>
+                                    <td>PnL: fees + il + gas</td>
+                                    <td><code>(fees + il) - costs_quote</code></td>
+                                </tr>
+                                <tr>
+                                    <td>PnL: fees + il + gas + cex</td>
+                                    <td><code>(fees + il + gas) + cex_pnl_quote</code></td>
+                                </tr>
+                                <tr>
+                                    <td>APR: fees / fees+il / fees+il+gas / fees+il+gas+cex</td>
+                                    <td>Для каждого уровня используется базовая формула APR с соответствующим PnL.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>8) Iteration details</h5>
+                        <table class="table table-sm table-bordered help-table help-3">
+                            <thead>
+                                <tr>
+                                    <th>Показатель</th>
+                                    <th>Формула</th>
+                                    <th>Комментарий</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>PnL with hedge</td>
+                                    <td><code>pnl_with_hedge_quote</code></td>
+                                    <td>Итог итерации с hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>PnL without hedge</td>
+                                    <td><code>pnl_without_hedge_quote</code></td>
+                                    <td>Итог итерации без hedge.</td>
+                                </tr>
+                                <tr>
+                                    <td>APR with/without hedge</td>
+                                    <td>Базовая формула APR с соответствующим PnL и <code>pool_hold_seconds</code>.</td>
+                                    <td>Нормализация на год.</td>
+                                </tr>
+                                <tr>
+                                    <td>Impermanent loss quote</td>
+                                    <td><code>-dex_realized_il_quote</code></td>
+                                    <td>Положительное значение означает величину IL как потери.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h5>9) Практическая интерпретация знака</h5>
+                        <table class="table table-sm table-bordered help-table help-2">
+                            <tbody>
+                                <tr><th>PnL &gt; 0</th><td>Прибыль.</td></tr>
+                                <tr><th>PnL &lt; 0</th><td>Убыток.</td></tr>
+                                <tr><th>APR &gt; 0</th><td>Положительная годовая доходность при текущей динамике.</td></tr>
+                                <tr><th>APR &lt; 0</th><td>Отрицательная годовая доходность при текущей динамике.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}

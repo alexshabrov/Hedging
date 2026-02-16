@@ -633,6 +633,7 @@ class FrontendIterationDoc(StrictModel):
 ### View models ###
 class FrontendPositionRow(StrictModel):
     run_id: str
+    network: str
     symbol: str
     status: BackendRunLifecycle
     first_started_at_ms: int
@@ -665,6 +666,8 @@ class FrontendPositionRow(StrictModel):
     hedge_pnl_quote: float
     costs_quote: float
     token_id: Optional[int]
+    pool_url: Optional[str]
+    revert_link: Optional[str]
     last_error: Optional[str]
     iterations_count: int
     is_active: bool
@@ -672,6 +675,7 @@ class FrontendPositionRow(StrictModel):
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
             'run_id': self.run_id,
+            'network': self.network,
             'symbol': self.symbol,
             'status': self.status.value,
             'first_started_at_ms': int(self.first_started_at_ms),
@@ -704,6 +708,8 @@ class FrontendPositionRow(StrictModel):
             'hedge_pnl_quote': float(self.hedge_pnl_quote),
             'costs_quote': float(self.costs_quote),
             'token_id': None if self.token_id is None else int(self.token_id),
+            'pool_url': self.pool_url,
+            'revert_link': self.revert_link,
             'last_error': self.last_error,
             'iterations_count': int(self.iterations_count),
             'is_active': bool(self.is_active),

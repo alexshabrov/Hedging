@@ -21,6 +21,7 @@ from frontend.modules.frontend_env import (
     get_cowswap_poll_interval_sec,
 )
 from frontend.modules.pages.dashboard_module import DashboardModule
+from frontend.modules.pages.help_module import HelpModule
 from frontend.modules.pages.positions_module import PositionsModule
 from frontend.modules.pages.runs_module import RunsModule
 from frontend.modules.models.frontend_models import FrontendRuntimeConfig
@@ -69,6 +70,7 @@ class Frontend:
         self.dashboard_module = DashboardModule(app, self._service)
         self.positions_module = PositionsModule(app, self._service)
         self.runs_module = RunsModule(app, self._service)
+        self.help_module = HelpModule(app)
 
     def _register_routes(self, app: Flask) -> None:
         @app.route('/', methods=['GET'])

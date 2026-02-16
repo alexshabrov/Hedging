@@ -254,6 +254,7 @@ class FrontendService:
         template_id = None
         if live_details is not None:
             live_position = frontend_position_view_from_dict(live_details['position'])
+            config = HedgerConfig.from_dict(live_details['config'])
             is_active = live_position.status in [
                 BackendRunLifecycle.INITIALIZED,
                 BackendRunLifecycle.RUNNING,
@@ -263,8 +264,8 @@ class FrontendService:
                 position=live_position,
                 iterations_count=len(iteration_rows),
                 is_active=bool(is_active),
+                network=str(config.network),
             )
-            config = HedgerConfig.from_dict(live_details['config'])
             template_id = None if live_details['template_id'] is None else str(live_details['template_id'])
         elif active_doc is not None:
             position_row = self._build_position_row_from_active(active_doc)
@@ -449,12 +450,28 @@ class FrontendService:
         return self._backend_api.list_runtime_positions()
 
     def _build_position_row_from_active(self, doc: FrontendActivePositionDoc) -> FrontendPositionRow:
-        return self._build_position_row_common(doc.position, doc.iterations_count, True)
+        return self._build_position_row_common(
+            position=doc.position,
+            iterations_count=doc.iterations_count,
+            is_active=True,
+            network=str(doc.config.network),
+        )
 
     def _build_position_row_from_archive(self, doc: FrontendArchivePositionDoc) -> FrontendPositionRow:
-        return self._build_position_row_common(doc.position, doc.iterations_count, False)
+        return self._build_position_row_common(
+            position=doc.position,
+            iterations_count=doc.iterations_count,
+            is_active=False,
+            network=str(doc.config.network),
+        )
 
-    def _build_position_row_common(self, position: BackendPositionView, iterations_count: int, is_active: bool) -> FrontendPositionRow:
+    def _build_position_row_common(
+        self,
+        position: BackendPositionView,
+        iterations_count: int,
+        is_active: bool,
+        network: str,
+    ) -> FrontendPositionRow:
         total_quote = float(position.total_quote)
         pnl_with_hedge_quote = float(position.pnl_with_hedge_quote)
         pnl_without_hedge_quote = float(position.pnl_without_hedge_quote)
@@ -476,12 +493,22 @@ class FrontendService:
 
         if float(total_quote) <= 0.0:
             raise RuntimeError(f'FrontendService._build_position_row_common: total_quote <= 0: {total_quote}')
+        if not isinstance(network, str) or len(network) == 0:
+            raise RuntimeError('FrontendService._build_position_row_common: network is empty')
 
         pnl_with_hedge_pct = (float(pnl_with_hedge_quote) / float(total_quote)) * 100.0
         pnl_without_hedge_pct = (float(pnl_without_hedge_quote) / float(total_quote)) * 100.0
+        token_id = None if position.token_id is None else int(position.token_id)
+        pool_url = None
+        revert_link = None
+        if token_id is not None and int(token_id) > 0:
+            network_key = str(network).lower()
+            pool_url = f'https://app.uniswap.org/positions/v3/{network_key}/{int(token_id)}'
+            revert_link = f'https://revert.finance/#/uniswap-position/{network_key}/{int(token_id)}'
 
         return FrontendPositionRow(
             run_id=str(position.run_id),
+            network=str(network),
             symbol=str(position.symbol),
             status=BackendRunLifecycle(str(position.status.value)),
             first_started_at_ms=int(position.first_started_at_ms),
@@ -513,7 +540,9 @@ class FrontendService:
             price_pnl_quote=float(position.price_pnl_quote),
             hedge_pnl_quote=float(position.hedge_pnl_quote),
             costs_quote=float(position.costs_quote),
-            token_id=None if position.token_id is None else int(position.token_id),
+            token_id=token_id,
+            pool_url=pool_url,
+            revert_link=revert_link,
             last_error=None if position.last_error is None else str(position.last_error),
             iterations_count=int(iterations_count),
             is_active=bool(is_active),

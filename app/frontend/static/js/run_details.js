@@ -43,6 +43,17 @@
         return '<span class="badge status-badge status-badge-' + key + '">' + escapeHtml(status) + '</span>';
     }
 
+    function tokenLinksHtml(poolUrl, revertUrl) {
+        var links = [];
+        if (poolUrl !== null && poolUrl !== undefined && String(poolUrl).length > 0) {
+            links.push('<a href="' + escapeHtml(poolUrl) + '" target="_blank" rel="noopener noreferrer" class="ml-1">Uniswap</a>');
+        }
+        if (revertUrl !== null && revertUrl !== undefined && String(revertUrl).length > 0) {
+            links.push('<a href="' + escapeHtml(revertUrl) + '" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>');
+        }
+        return links.join('');
+    }
+
     function fmt4(value) {
         var n = Number(value);
         if (!Number.isFinite(n)) {
@@ -155,6 +166,7 @@
         var p = item.position;
         setHtml('run-status', statusBadgeHtml(p.status));
         setText('run-token-id', p.token_id);
+        setHtml('run-token-links', tokenLinksHtml(p.pool_url, p.revert_link));
         setText('run-symbol', p.symbol);
         setText('run-started', utcTs(p.first_started_at_ms));
         setText('run-runtime', p.runtime_dhm);

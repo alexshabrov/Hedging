@@ -32,7 +32,15 @@
                                 {% for row in rows %}
                                     <tr>
                                         <td><a href="/runs/{{ row.run_id }}">{{ row.run_id }}</a></td>
-                                        <td>{{ row.token_id if row.token_id is not none else '-' }}</td>
+                                        <td>
+                                            {% if row.token_id is not none %}
+                                                {{ row.token_id }}
+                                                {% if row.pool_url %}<a href="{{ row.pool_url }}" target="_blank" rel="noopener noreferrer" class="ml-1">Uniswap</a>{% endif %}
+                                                {% if row.revert_link %}<a href="{{ row.revert_link }}" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>{% endif %}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
                                         <td>{{ row.symbol }}</td>
                                         <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
                                         <td>{{ utc_ts(row.first_started_at_ms) }}</td>
