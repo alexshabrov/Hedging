@@ -97,6 +97,17 @@ class StorageService:
             out.append(FrontendIterationDoc.from_dict(item))
         return out
 
+    def list_iterations_all_raw(self) -> List[dict]:
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort([('run_id', 1), ('iteration_no', 1)])
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_iterations_all_raw: item is not dict: {type(item)}')
+            out.append(item)
+        return out
+
     def find_iteration(self, iteration_id: str) -> FrontendIterationDoc:
         if not isinstance(iteration_id, str) or len(iteration_id) == 0:
             raise RuntimeError('StorageService.find_iteration: iteration_id is empty')

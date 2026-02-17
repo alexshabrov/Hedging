@@ -5,7 +5,8 @@ Version: 3.0
 """
 import re
 import time, uuid
-from typing import List
+from decimal import Decimal, InvalidOperation
+from typing import Dict, List
 
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
@@ -219,6 +220,7 @@ class FrontendService:
     def list_positions(self) -> List[FrontendPositionRow]:
         active_docs = self._storage.list_active_positions()
         archive_docs = self._storage.list_archive_positions()
+        iteration_docs_raw = self._storage.list_iterations_all_raw()
 
         out = []
 
@@ -228,6 +230,7 @@ class FrontendService:
         for item in archive_docs:
             out.append(self._build_position_row_from_archive(item))
 
+        out = self._recalc_positions_from_iterations_raw(out, iteration_docs_raw)
         out.sort(key=lambda x: int(x.first_started_at_ms), reverse=True)
         return out
 
@@ -735,6 +738,232 @@ class FrontendService:
             order_url=str(order.url),
             swap_cost_quote=-float(row.swap_cost_quote),
         )
+
+    def _recalc_positions_from_iterations_raw(
+        self,
+        rows: List[FrontendPositionRow],
+        iteration_docs_raw: List[dict],
+    ) -> List[FrontendPositionRow]:
+        by_run: Dict[str, dict] = {}
+        for item in iteration_docs_raw:
+            calc = self._calc_iteration_components_from_raw(item)
+            run_id = str(calc['run_id'])
+            if run_id not in by_run:
+                by_run[run_id] = {
+                    'sum_fees_quote': 0.0,
+                    'sum_il_quote': 0.0,
+                    'sum_cex_quote': 0.0,
+                    'sum_costs_pnl_quote': 0.0,
+                    'sum_pnl_without_hedge_quote': 0.0,
+                    'sum_pnl_with_hedge_quote': 0.0,
+                    'sum_pool_hold_seconds': 0.0,
+                    'iterations_finished': 0,
+                }
+
+            agg = by_run[run_id]
+            agg['sum_fees_quote'] += float(calc['fees_quote'])
+            agg['sum_il_quote'] += float(calc['il_quote'])
+            agg['sum_cex_quote'] += float(calc['cex_quote'])
+            agg['sum_costs_pnl_quote'] += float(calc['costs_pnl_quote'])
+            agg['sum_pnl_without_hedge_quote'] += float(calc['pnl_without_hedge_quote'])
+            agg['sum_pnl_with_hedge_quote'] += float(calc['pnl_with_hedge_quote'])
+            agg['sum_pool_hold_seconds'] += float(calc['pool_hold_seconds'])
+            if bool(calc['is_finished']):
+                agg['iterations_finished'] += 1
+
+        out: List[FrontendPositionRow] = []
+        for row in rows:
+            run_id = str(row.run_id)
+            if run_id not in by_run:
+                out.append(row)
+                continue
+
+            agg = by_run[run_id]
+            total_quote = float(row.total_quote)
+            if float(total_quote) <= 0.0:
+                raise RuntimeError(f'FrontendService._recalc_positions_from_iterations_raw: total_quote <= 0 for run_id={run_id}')
+
+            pnl_with_hedge_quote = float(agg['sum_pnl_with_hedge_quote'])
+            pnl_without_hedge_quote = float(agg['sum_pnl_without_hedge_quote'])
+            pnl_fees_quote = float(agg['sum_fees_quote'])
+            pnl_fees_il_quote = float(agg['sum_fees_quote']) + float(agg['sum_il_quote'])
+            pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(agg['sum_costs_pnl_quote'])
+            pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(agg['sum_cex_quote'])
+            hold_sec = float(agg['sum_pool_hold_seconds'])
+
+            apr_with_hedge_pct = 0.0
+            apr_without_hedge_pct = 0.0
+            apr_fees_pct = 0.0
+            apr_fees_il_pct = 0.0
+            apr_fees_il_gas_pct = 0.0
+            apr_fees_il_gas_cex_pct = 0.0
+            if float(hold_sec) > 0.0:
+                apr_with_hedge_pct = self._calc_apr(float(pnl_with_hedge_quote), float(total_quote), float(hold_sec))
+                apr_without_hedge_pct = self._calc_apr(float(pnl_without_hedge_quote), float(total_quote), float(hold_sec))
+                apr_fees_pct = self._calc_apr(float(pnl_fees_quote), float(total_quote), float(hold_sec))
+                apr_fees_il_pct = self._calc_apr(float(pnl_fees_il_quote), float(total_quote), float(hold_sec))
+                apr_fees_il_gas_pct = self._calc_apr(float(pnl_fees_il_gas_quote), float(total_quote), float(hold_sec))
+                apr_fees_il_gas_cex_pct = self._calc_apr(float(pnl_fees_il_gas_cex_quote), float(total_quote), float(hold_sec))
+
+            avg_iteration_lifetime_sec = 0.0
+            iterations_finished = int(agg['iterations_finished'])
+            if int(iterations_finished) > 0:
+                avg_iteration_lifetime_sec = float(hold_sec) / float(iterations_finished)
+
+            out.append(row.model_copy(update={
+                'iterations_finished': int(iterations_finished),
+                'avg_iteration_lifetime_sec': float(avg_iteration_lifetime_sec),
+                'pnl_with_hedge_quote': float(pnl_with_hedge_quote),
+                'pnl_without_hedge_quote': float(pnl_without_hedge_quote),
+                'pnl_with_hedge_pct': float(pnl_with_hedge_quote / total_quote * 100.0),
+                'pnl_without_hedge_pct': float(pnl_without_hedge_quote / total_quote * 100.0),
+                'apr_with_hedge_pct': float(apr_with_hedge_pct),
+                'apr_without_hedge_pct': float(apr_without_hedge_pct),
+                'fees_quote': float(agg['sum_fees_quote']),
+                'price_pnl_quote': float(agg['sum_il_quote']),
+                'hedge_pnl_quote': float(agg['sum_cex_quote']),
+                'costs_quote': float(agg['sum_costs_pnl_quote']),
+                'pnl_fees_quote': float(pnl_fees_quote),
+                'pnl_fees_il_quote': float(pnl_fees_il_quote),
+                'pnl_fees_il_gas_quote': float(pnl_fees_il_gas_quote),
+                'pnl_fees_il_gas_cex_quote': float(pnl_fees_il_gas_cex_quote),
+                'apr_fees_pct': float(apr_fees_pct),
+                'apr_fees_il_pct': float(apr_fees_il_pct),
+                'apr_fees_il_gas_pct': float(apr_fees_il_gas_pct),
+                'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex_pct),
+            }))
+
+        return out
+
+    def _calc_iteration_components_from_raw(self, item: dict) -> dict:
+        if item is None:
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: item is None')
+        if not isinstance(item, dict):
+            raise RuntimeError(f'FrontendService._calc_iteration_components_from_raw: item is not dict: {type(item)}')
+        if 'run_id' not in item:
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: run_id missing')
+        if 'stats' not in item or not isinstance(item['stats'], dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats missing or invalid')
+
+        stats = item['stats']
+        calc = stats.get('calc')
+        uniswap = stats.get('uniswap')
+        live = stats.get('live')
+        if not isinstance(calc, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats.calc missing or invalid')
+        if not isinstance(uniswap, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats.uniswap missing or invalid')
+        if not isinstance(live, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats.live missing or invalid')
+
+        snap = live.get('last_snapshot')
+        if not isinstance(snap, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats.live.last_snapshot missing or invalid')
+        symbol_rule = snap.get('symbol_rule')
+        metrics = snap.get('metrics')
+        if not isinstance(symbol_rule, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats.live.last_snapshot.symbol_rule missing or invalid')
+        if not isinstance(metrics, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: stats.live.last_snapshot.metrics missing or invalid')
+
+        price_step_raw = str(symbol_rule.get('price_step', '')).strip()
+        if len(price_step_raw) == 0:
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: symbol_rule.price_step is empty')
+        try:
+            price_step = Decimal(price_step_raw)
+        except InvalidOperation as exc:
+            raise RuntimeError(f'FrontendService._calc_iteration_components_from_raw: invalid price_step: {price_step_raw}') from exc
+        if price_step <= 0:
+            raise RuntimeError(f'FrontendService._calc_iteration_components_from_raw: bad price_step: {price_step_raw}')
+
+        last_mid_price_units = int(metrics.get('last_mid_price_units', 0))
+        if int(last_mid_price_units) <= 0:
+            raise RuntimeError(
+                f'FrontendService._calc_iteration_components_from_raw: bad last_mid_price_units: {last_mid_price_units}'
+            )
+        valuation_price = float(Decimal(int(last_mid_price_units)) * price_step)
+        if float(valuation_price) <= 0.0:
+            raise RuntimeError(f'FrontendService._calc_iteration_components_from_raw: bad valuation_price: {valuation_price}')
+
+        chases = metrics.get('chases')
+        if not isinstance(chases, list):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: metrics.chases missing or invalid')
+        open_filled_quote_units = 0
+        for chase in chases:
+            if not isinstance(chase, dict):
+                continue
+            if str(chase.get('kind')) == 'open' and bool(chase.get('ok')) and int(chase.get('filled_quote_units', 0)) > 0:
+                open_filled_quote_units = int(chase.get('filled_quote_units', 0))
+                break
+        if int(open_filled_quote_units) <= 0:
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: open_filled_quote_units not found')
+
+        mint = uniswap.get('mint')
+        decrease = uniswap.get('decrease')
+        collect = uniswap.get('collect')
+        if not isinstance(mint, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: uniswap.mint missing or invalid')
+        if not isinstance(decrease, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: uniswap.decrease missing or invalid')
+        if not isinstance(collect, dict):
+            raise RuntimeError('FrontendService._calc_iteration_components_from_raw: uniswap.collect missing or invalid')
+
+        mint_base = 0.0 if mint.get('amount_base') is None else float(mint.get('amount_base'))
+        mint_quote = 0.0 if mint.get('amount_quote') is None else float(mint.get('amount_quote'))
+        decrease_base = 0.0 if decrease.get('amount_base') is None else float(decrease.get('amount_base'))
+        decrease_quote = 0.0 if decrease.get('amount_quote') is None else float(decrease.get('amount_quote'))
+        collect_base = 0.0 if collect.get('amount_base') is None else float(collect.get('amount_base'))
+        collect_quote = 0.0 if collect.get('amount_quote') is None else float(collect.get('amount_quote'))
+
+        hedge_quote = float(calc.get('hedge_quote'))
+        quote_per_cex_unit = float(hedge_quote) / float(open_filled_quote_units)
+        if float(quote_per_cex_unit) <= 0.0:
+            raise RuntimeError(f'FrontendService._calc_iteration_components_from_raw: bad quote_per_cex_unit: {quote_per_cex_unit}')
+        cex_units = int(metrics.get('realized_pnl_quote_units', 0)) + int(metrics.get('unrealized_pnl_quote_units', 0))
+        cex_quote = float(cex_units) * float(quote_per_cex_unit)
+
+        portfolio_before_quote = float(mint_base) * float(valuation_price) + float(mint_quote)
+        portfolio_after_quote = float(decrease_base) * float(valuation_price) + float(decrease_quote)
+        il_quote = float(portfolio_after_quote) - float(portfolio_before_quote)
+
+        fees_quote = (float(collect_quote) - float(decrease_quote)) + (
+            (float(collect_base) - float(decrease_base)) * float(valuation_price)
+        )
+
+        gas_paid_eth = (
+            (0.0 if mint.get('gas_cost_eth') is None else float(mint.get('gas_cost_eth')))
+            + (0.0 if decrease.get('gas_cost_eth') is None else float(decrease.get('gas_cost_eth')))
+            + (0.0 if collect.get('gas_cost_eth') is None else float(collect.get('gas_cost_eth')))
+        )
+        gas_paid_quote = float(gas_paid_eth) * float(valuation_price)
+
+        swap_cost_quote = float(item.get('swap_cost_quote', 0.0))
+        costs_abs_quote = float(gas_paid_quote) + float(swap_cost_quote)
+        costs_pnl_quote = -float(costs_abs_quote)
+
+        pnl_without_hedge_quote = float(il_quote) + float(fees_quote) + float(costs_pnl_quote)
+        pnl_with_hedge_quote = float(pnl_without_hedge_quote) + float(cex_quote)
+
+        mint_tx_timestamp_ms = int(uniswap.get('mint_tx_timestamp_ms', 0))
+        decrease_tx_timestamp_ms = int(uniswap.get('decrease_tx_timestamp_ms', 0))
+        if int(mint_tx_timestamp_ms) <= 0 or int(decrease_tx_timestamp_ms) <= int(mint_tx_timestamp_ms):
+            raise RuntimeError(
+                'FrontendService._calc_iteration_components_from_raw: bad hold timestamps '
+                f'mint={mint_tx_timestamp_ms} decrease={decrease_tx_timestamp_ms}'
+            )
+        pool_hold_seconds = float(int(decrease_tx_timestamp_ms) - int(mint_tx_timestamp_ms)) / 1000.0
+
+        return {
+            'run_id': str(item['run_id']),
+            'is_finished': str(item.get('status', '')) == 'finished',
+            'fees_quote': float(fees_quote),
+            'il_quote': float(il_quote),
+            'cex_quote': float(cex_quote),
+            'costs_pnl_quote': float(costs_pnl_quote),
+            'pnl_without_hedge_quote': float(pnl_without_hedge_quote),
+            'pnl_with_hedge_quote': float(pnl_with_hedge_quote),
+            'pool_hold_seconds': float(pool_hold_seconds),
+        }
 
     def _build_hedge_chases(self, row: FrontendIterationDoc) -> List[FrontendIterationHedgeChaseRow]:
         out = []
