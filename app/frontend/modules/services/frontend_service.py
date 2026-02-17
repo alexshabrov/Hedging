@@ -404,6 +404,7 @@ class FrontendService:
             total_invested_quote += float(row.total_quote)
             total_pnl_with_hedge_quote += float(row.pnl_with_hedge_quote)
             total_pnl_without_hedge_quote += float(row.pnl_without_hedge_quote)
+            # Frontend row stores costs as signed PnL component (usually negative).
             total_costs_quote += float(row.costs_quote)
 
             if float(row.total_quote) > 0.0:
@@ -477,8 +478,8 @@ class FrontendService:
         pnl_without_hedge_quote = float(position.pnl_without_hedge_quote)
         pnl_fees_quote = float(position.fees_quote)
         pnl_fees_il_quote = float(position.fees_quote) + float(position.price_pnl_quote)
-        # Position view stores aggregated costs; exact gas-only split is derived from iteration-level rows.
-        pnl_fees_il_gas_quote = float(pnl_without_hedge_quote)
+        costs_pnl_quote = -float(position.costs_quote)
+        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(costs_pnl_quote)
         pnl_fees_il_gas_cex_quote = float(pnl_with_hedge_quote)
         hold_sec = float(position.avg_iteration_lifetime_sec) * float(position.iterations_finished)
         apr_fees_pct = 0.0
@@ -539,7 +540,7 @@ class FrontendService:
             fees_quote=float(position.fees_quote),
             price_pnl_quote=float(position.price_pnl_quote),
             hedge_pnl_quote=float(position.hedge_pnl_quote),
-            costs_quote=float(position.costs_quote),
+            costs_quote=float(costs_pnl_quote),
             token_id=token_id,
             pool_url=pool_url,
             revert_link=revert_link,
@@ -565,8 +566,8 @@ class FrontendService:
         pnl_without_hedge_pct = float(row.pnl_without_hedge_quote) / float(total_quote) * 100.0
         pnl_fees_quote = float(row.pnl.fees_received_quote)
         pnl_fees_il_quote = float(row.pnl.fees_received_quote) + float(row.pnl.dex_realized_il_quote)
-        # "Gas" bucket in APR includes all execution costs for the iteration (on-chain gas + rebalance swap fee).
-        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) - float(row.costs_quote)
+        costs_pnl_quote = -float(row.costs_quote)
+        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(costs_pnl_quote)
         pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(row.pnl.cex_pnl_quote)
 
         pool_hold_seconds = float(row.pnl.pool_hold_seconds)
@@ -613,7 +614,7 @@ class FrontendService:
             fees_quote=float(row.pnl.fees_received_quote),
             price_pnl_quote=float(row.pnl.dex_realized_il_quote),
             hedge_pnl_quote=float(row.pnl.cex_pnl_quote),
-            costs_quote=float(row.costs_quote),
+            costs_quote=float(costs_pnl_quote),
             error=None if row.error is None else str(row.error),
         )
 
@@ -645,7 +646,7 @@ class FrontendService:
             closed_quote=float(closed_quote),
             fees_quote=float(pnl.fees_received_quote),
             price_pnl_quote=float(pnl.dex_realized_il_quote),
-            impermanent_loss_quote=float(-pnl.dex_realized_il_quote),
+            impermanent_loss_quote=float(pnl.dex_realized_il_quote),
         )
 
     def _build_hedge_block(self, row: FrontendIterationDoc) -> FrontendIterationHedgeBlock:
@@ -704,7 +705,7 @@ class FrontendService:
                 elapsed_sec=None,
                 order_status=None,
                 order_url=None,
-                swap_cost_quote=float(row.swap_cost_quote),
+                swap_cost_quote=-float(row.swap_cost_quote),
             )
 
         if rebalance.order is None:
@@ -718,7 +719,7 @@ class FrontendService:
                 elapsed_sec=None,
                 order_status=None,
                 order_url=None,
-                swap_cost_quote=float(row.swap_cost_quote),
+                swap_cost_quote=-float(row.swap_cost_quote),
             )
 
         order = rebalance.order
@@ -732,7 +733,7 @@ class FrontendService:
             elapsed_sec=int(order.elapsed_sec),
             order_status=str(order.status),
             order_url=str(order.url),
-            swap_cost_quote=float(row.swap_cost_quote),
+            swap_cost_quote=-float(row.swap_cost_quote),
         )
 
     def _build_hedge_chases(self, row: FrontendIterationDoc) -> List[FrontendIterationHedgeChaseRow]:

@@ -401,6 +401,10 @@ def _to_quote_pnl(base_delta: float, quote_delta: float, base_price: float) -> f
     return float(base_delta) * float(base_price) + float(quote_delta)
 
 
+def _portfolio_quote_value(base_amount: float, quote_amount: float, valuation_price: float) -> float:
+    return float(base_amount) * float(valuation_price) + float(quote_amount)
+
+
 def _avg_quote_cost_per_base(base_accum: float, quote_accum: float) -> float:
     if abs(float(base_accum)) <= 1e-18:
         raise RuntimeError(f'cannot compute avg quote/base cost with base_accum={base_accum}')
@@ -981,6 +985,10 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
     sum_fee_usdc = 0.0
     realized_il_weth = 0.0
     realized_il_usdc = 0.0
+    sum_closed_principal_weth = 0.0
+    sum_closed_principal_usdc = 0.0
+    sum_decrease_weth = 0.0
+    sum_decrease_usdc = 0.0
     n_swaps = 0
 
     pending_principal_by_token: Dict[int, PendingPrincipal] = {}
@@ -1061,6 +1069,10 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
 
             realized_il_weth += float(dec_move.weth) - float(closed_principal_weth)
             realized_il_usdc += float(dec_move.usdc) - float(closed_principal_usdc)
+            sum_closed_principal_weth += float(closed_principal_weth)
+            sum_closed_principal_usdc += float(closed_principal_usdc)
+            sum_decrease_weth += float(dec_move.weth)
+            sum_decrease_usdc += float(dec_move.usdc)
 
             next_liquidity_open = int(prev.liquidity_open) - int(dec_move.liquidity)
             next_principal_weth_open = float(prev.principal_weth_open) - float(closed_principal_weth)
@@ -1169,7 +1181,18 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
     il_usdc = float(realized_il_usdc)
     gas_usdc = float(sum_gas_eth) * float(eth_price)
     fees_quote = _to_quote_pnl(float(fees_weth), float(fees_usdc), float(eth_price))
-    il_quote = _to_quote_pnl(float(il_weth), float(il_usdc), float(eth_price))
+    il_quote = (
+        _portfolio_quote_value(
+            base_amount=float(sum_decrease_weth),
+            quote_amount=float(sum_decrease_usdc),
+            valuation_price=float(eth_price),
+        )
+        - _portfolio_quote_value(
+            base_amount=float(sum_closed_principal_weth),
+            quote_amount=float(sum_closed_principal_usdc),
+            valuation_price=float(eth_price),
+        )
+    )
     swaps_quote = _to_quote_pnl(float(sum_swap_weth), float(sum_swap_usdc), float(eth_price))
 
     pnl_by_components = (

@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from live.lib.strict_model import StrictModel
 from live.logic.models import HedgeChaseKind
 from backend.models.hedger_models import HedgerStats
@@ -26,16 +28,39 @@ class HedgerPnlStats(StrictModel):
         }
 
 
-def _to_float(v, name):
-    if v is None:
-        raise RuntimeError(f'Hedger helper: {name} is None')
-    return float(v)
-
-
 def _to_optional_float(v) -> float:
     if v is None:
         return 0.0
     return float(v)
+
+
+def _get_valuation_price_quote(stats: HedgerStats) -> float:
+    snap = stats.live.last_snapshot
+    if snap is None:
+        raise RuntimeError('Hedger helper: stats.live.last_snapshot is None')
+    if snap.symbol_rule is None:
+        raise RuntimeError('Hedger helper: stats.live.last_snapshot.symbol_rule is None')
+
+    price_step_raw = str(snap.symbol_rule.price_step).strip()
+    if len(price_step_raw) == 0:
+        raise RuntimeError('Hedger helper: stats.live.last_snapshot.symbol_rule.price_step is empty')
+    try:
+        price_step = Decimal(price_step_raw)
+    except InvalidOperation as exc:
+        raise RuntimeError(f'Hedger helper: invalid price_step: {price_step_raw}') from exc
+    if price_step <= 0:
+        raise RuntimeError(f'Hedger helper: bad price_step: {price_step_raw}')
+
+    if snap.metrics is None:
+        raise RuntimeError('Hedger helper: stats.live.last_snapshot.metrics is None')
+    last_mid_price_units = int(snap.metrics.last_mid_price_units)
+    if int(last_mid_price_units) <= 0:
+        raise RuntimeError(f'Hedger helper: bad last_mid_price_units: {last_mid_price_units}')
+
+    valuation_price = float(Decimal(int(last_mid_price_units)) * price_step)
+    if float(valuation_price) <= 0:
+        raise RuntimeError(f'Hedger helper: bad valuation_price: {valuation_price}')
+    return float(valuation_price)
 
 
 def _get_open_filled_quote_units(stats: HedgerStats) -> int:
@@ -78,8 +103,7 @@ def calc_hedger_pnl_stats(stats: HedgerStats) -> HedgerPnlStats:
     snap = stats.live.last_snapshot
     if snap is None:
         raise RuntimeError('Hedger helper: stats.live.last_snapshot is None')
-
-    base_price = _to_float(stats.calc.base_price, 'stats.calc.base_price')
+    valuation_price = _get_valuation_price_quote(stats)
 
     open_filled_quote_units = _get_open_filled_quote_units(stats)
     if int(open_filled_quote_units) <= 0:
@@ -99,12 +123,14 @@ def calc_hedger_pnl_stats(stats: HedgerStats) -> HedgerPnlStats:
     collect_quote = _to_optional_float(collect.amount_quote)
     collect_base = _to_optional_float(collect.amount_base)
 
-    dex_realized_il_quote = (float(decrease_quote) + float(decrease_base) * float(base_price)) - (float(mint_quote) + float(mint_base) * float(base_price))
+    portfolio_before_quote = float(mint_base) * float(valuation_price) + float(mint_quote)
+    portfolio_after_quote = float(decrease_base) * float(valuation_price) + float(decrease_quote)
+    dex_realized_il_quote = float(portfolio_after_quote) - float(portfolio_before_quote)
     # collect_fees returns full owed tokens (including principal moved into owed after decrease).
     # Net fees are the part above decrease amounts.
     fees_received_quote = (
         (float(collect_quote) - float(decrease_quote))
-        + (float(collect_base) - float(decrease_base)) * float(base_price)
+        + (float(collect_base) - float(decrease_base)) * float(valuation_price)
     )
 
     gas_paid_eth = (
@@ -112,7 +138,7 @@ def calc_hedger_pnl_stats(stats: HedgerStats) -> HedgerPnlStats:
         + _to_optional_float(decrease.gas_cost_eth)
         + _to_optional_float(collect.gas_cost_eth)
     )
-    gas_paid_quote = float(gas_paid_eth) * float(base_price)
+    gas_paid_quote = float(gas_paid_eth) * float(valuation_price)
     
     mint_tx_timestamp_ms = int(stats.uniswap.mint_tx_timestamp_ms)
     decrease_tx_timestamp_ms = int(stats.uniswap.decrease_tx_timestamp_ms)

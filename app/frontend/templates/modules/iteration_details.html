@@ -29,7 +29,7 @@
                                 <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.row.fees_quote) }}</td></tr>
                                 <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.row.price_pnl_quote) }}</td></tr>
                                 <tr><th>Hedge PnL quote</th><td>{{ '%.6f'|format(details.row.hedge_pnl_quote) }}</td></tr>
-                                <tr><th>Costs quote</th><td>{{ '%.6f'|format(details.row.costs_quote) }}</td></tr>
+                                <tr><th>Gas/Costs PnL quote</th><td>{{ '%.6f'|format(details.row.costs_quote) }}</td></tr>
                             </tbody>
                         </table>
 
@@ -45,7 +45,7 @@
                                 <tr><th>Closed quote</th><td>{{ '%.6f'|format(details.lp.closed_quote) }}</td></tr>
                                 <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.lp.fees_quote) }}</td></tr>
                                 <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.lp.price_pnl_quote) }}</td></tr>
-                                <tr><th>Impermanent loss quote</th><td>{{ '%.6f'|format(details.lp.impermanent_loss_quote) }}</td></tr>
+                                <tr><th>IL PnL quote</th><td>{{ '%.6f'|format(details.lp.impermanent_loss_quote) }}</td></tr>
                             </tbody>
                         </table>
 
@@ -78,7 +78,7 @@
                                 <tr><th>Elapsed sec</th><td>{{ details.rebalance.elapsed_sec }}</td></tr>
                                 <tr><th>Order status</th><td>{% with status=details.rebalance.order_status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
                                 <tr><th>Order url</th><td>{{ details.rebalance.order_url }}</td></tr>
-                                <tr><th>Swap cost quote</th><td>{{ '%.6f'|format(details.rebalance.swap_cost_quote) }}</td></tr>
+                                <tr><th>Swap cost PnL quote</th><td>{{ '%.6f'|format(details.rebalance.swap_cost_quote) }}</td></tr>
                             </tbody>
                         </table>
 

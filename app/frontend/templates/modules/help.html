@@ -81,7 +81,7 @@
                             </tbody>
                         </table>
 
-                        <h5>3) Что такое операционные издержки (Costs)</h5>
+                        <h5>3) Gas/Costs как компонент PnL</h5>
                         <table class="table table-sm table-bordered help-table help-3">
                             <thead>
                                 <tr>
@@ -92,13 +92,13 @@
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td>Costs quote</td>
-                                    <td><code>costs_quote = gas_paid_quote + swap_cost_quote</code></td>
-                                    <td>Полные операционные издержки итерации в quote.</td>
+                                    <td>Costs PnL quote</td>
+                                    <td><code>costs_quote = -(gas_paid_quote + swap_cost_quote)</code></td>
+                                    <td>Компонент PnL для издержек; обычно отрицательный (убыток).</td>
                                 </tr>
                                 <tr>
                                     <td>Gas paid quote</td>
-                                    <td><code>gas_paid_quote = gas_paid_eth * base_price</code></td>
+                                    <td><code>gas_paid_quote = gas_paid_eth * valuation_price</code></td>
                                     <td>Пересчёт on-chain gas из ETH в quote.</td>
                                 </tr>
                                 <tr>
@@ -112,9 +112,9 @@
                                     <td>Комиссия исполнения ребаланса.</td>
                                 </tr>
                                 <tr>
-                                    <td>Total costs quote (Dashboard)</td>
+                                    <td>Total gas/costs PnL quote (Dashboard)</td>
                                     <td><code>sum(costs_quote)</code></td>
-                                    <td>Сумма операционных издержек по всем run.</td>
+                                    <td>Сумма PnL-компонента издержек по всем run (обычно отрицательная).</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -133,7 +133,7 @@
                                     <td>DEX price PnL</td>
                                     <td>
                                         <code>
-                                            dex_realized_il_quote = (decrease_quote + decrease_base * base_price) - (mint_quote + mint_base * base_price)
+                                            dex_realized_il_quote = (decrease_base * valuation_price + decrease_quote) - (mint_base * valuation_price + mint_quote)
                                         </code>
                                     </td>
                                     <td>Результат ценового движения LP-позиции.</td>
@@ -142,7 +142,7 @@
                                     <td>Fees received quote</td>
                                     <td>
                                         <code>
-                                            (collect_quote - decrease_quote) + (collect_base - decrease_base) * base_price
+                                            (collect_quote - decrease_quote) + (collect_base - decrease_base) * valuation_price
                                         </code>
                                     </td>
                                     <td>Чистые LP-комиссии сверх возвращённого principal.</td>
@@ -158,7 +158,7 @@
                                 </tr>
                                 <tr>
                                     <td>PnL without hedge</td>
-                                    <td><code>pnl_without_hedge_quote = dex_realized_il_quote + fees_received_quote - costs_quote</code></td>
+                                    <td><code>pnl_without_hedge_quote = dex_realized_il_quote + fees_received_quote + costs_quote</code></td>
                                     <td>Итог итерации без учёта результата CEX-хеджа.</td>
                                 </tr>
                                 <tr>
@@ -200,9 +200,9 @@
                                     <td>Итоговый PnL без учёта hedge.</td>
                                 </tr>
                                 <tr>
-                                    <td>Total costs quote</td>
+                                    <td>Total gas/costs PnL quote</td>
                                     <td><code>sum(costs_quote)</code></td>
-                                    <td>Суммарные издержки.</td>
+                                    <td>Суммарный PnL-компонент издержек (обычно отрицательный).</td>
                                 </tr>
                                 <tr>
                                     <td>APR with hedge (%)</td>
@@ -263,9 +263,9 @@
                                     <td>Результат хеджа на CEX.</td>
                                 </tr>
                                 <tr>
-                                    <td>Costs</td>
+                                    <td>Gas/Costs PnL</td>
                                     <td><code>costs_quote = sum(costs_quote по итерациям run)</code></td>
-                                    <td>Операционные издержки run (газ + комиссия ребаланса).</td>
+                                    <td>PnL-компонент операционных издержек run (газ + комиссия ребаланса).</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -289,7 +289,7 @@
                                 </tr>
                                 <tr>
                                     <td>PnL: fees + il + gas</td>
-                                    <td><code>(fees + il) - costs_quote</code></td>
+                                    <td><code>(fees + il) + costs_quote</code></td>
                                 </tr>
                                 <tr>
                                     <td>PnL: fees + il + gas + cex</td>
@@ -328,9 +328,9 @@
                                     <td>Нормализация на год.</td>
                                 </tr>
                                 <tr>
-                                    <td>Impermanent loss quote</td>
-                                    <td><code>-dex_realized_il_quote</code></td>
-                                    <td>Положительное значение означает величину IL как потери.</td>
+                                    <td>IL PnL quote</td>
+                                    <td><code>dex_realized_il_quote</code></td>
+                                    <td>Знак как у PnL: отрицательное значение = IL-убыток, положительное = IL-прибыль.</td>
                                 </tr>
                             </tbody>
                         </table>
