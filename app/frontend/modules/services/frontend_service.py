@@ -242,6 +242,7 @@ class FrontendService:
         archive_doc = self._storage.find_position_archive(run_id)
 
         iteration_docs = self._storage.list_iterations_by_run(run_id)
+        iteration_docs_raw = self._storage.list_iterations_by_run_raw(run_id)
         iteration_rows = []
         for item in iteration_docs:
             iteration_rows.append(self._build_iteration_row(item))
@@ -281,38 +282,12 @@ class FrontendService:
         else:
             raise RuntimeError(f'FrontendService.get_run_details: run not found: {run_id}')
 
-        if len(iteration_rows) > 0:
-            sum_fees = 0.0
-            sum_fees_il = 0.0
-            sum_fees_il_gas = 0.0
-            sum_fees_il_gas_cex = 0.0
-            sum_hold_sec = 0.0
-            for row in iteration_rows:
-                sum_fees += float(row.pnl_fees_quote)
-                sum_fees_il += float(row.pnl_fees_il_quote)
-                sum_fees_il_gas += float(row.pnl_fees_il_gas_quote)
-                sum_fees_il_gas_cex += float(row.pnl_fees_il_gas_cex_quote)
-            for item in iteration_docs:
-                sum_hold_sec += float(item.pnl.pool_hold_seconds)
-            apr_fees = 0.0
-            apr_fees_il = 0.0
-            apr_fees_il_gas = 0.0
-            apr_fees_il_gas_cex = 0.0
-            if float(sum_hold_sec) > 0.0:
-                apr_fees = self._calc_apr(float(sum_fees), float(position_row.total_quote), float(sum_hold_sec))
-                apr_fees_il = self._calc_apr(float(sum_fees_il), float(position_row.total_quote), float(sum_hold_sec))
-                apr_fees_il_gas = self._calc_apr(float(sum_fees_il_gas), float(position_row.total_quote), float(sum_hold_sec))
-                apr_fees_il_gas_cex = self._calc_apr(float(sum_fees_il_gas_cex), float(position_row.total_quote), float(sum_hold_sec))
-            position_row = position_row.model_copy(update={
-                'pnl_fees_quote': float(sum_fees),
-                'pnl_fees_il_quote': float(sum_fees_il),
-                'pnl_fees_il_gas_quote': float(sum_fees_il_gas),
-                'pnl_fees_il_gas_cex_quote': float(sum_fees_il_gas_cex),
-                'apr_fees_pct': float(apr_fees),
-                'apr_fees_il_pct': float(apr_fees_il),
-                'apr_fees_il_gas_pct': float(apr_fees_il_gas),
-                'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex),
-            })
+        if len(iteration_docs_raw) > 0:
+            agg = self._init_pnl_recalc_agg()
+            for item in iteration_docs_raw:
+                calc = self._calc_iteration_components_from_raw(item)
+                self._accumulate_pnl_recalc_agg(agg, calc)
+            position_row = self._apply_pnl_recalc_to_position_row(position_row, agg, f'get_run_details run_id={run_id}')
 
         failure_error_raw = self._pick_failure_error_raw(position_row, iteration_rows)
         failure_reason = self._describe_failure_reason(failure_error_raw)
@@ -749,27 +724,10 @@ class FrontendService:
             calc = self._calc_iteration_components_from_raw(item)
             run_id = str(calc['run_id'])
             if run_id not in by_run:
-                by_run[run_id] = {
-                    'sum_fees_quote': 0.0,
-                    'sum_il_quote': 0.0,
-                    'sum_cex_quote': 0.0,
-                    'sum_costs_pnl_quote': 0.0,
-                    'sum_pnl_without_hedge_quote': 0.0,
-                    'sum_pnl_with_hedge_quote': 0.0,
-                    'sum_pool_hold_seconds': 0.0,
-                    'iterations_finished': 0,
-                }
+                by_run[run_id] = self._init_pnl_recalc_agg()
 
             agg = by_run[run_id]
-            agg['sum_fees_quote'] += float(calc['fees_quote'])
-            agg['sum_il_quote'] += float(calc['il_quote'])
-            agg['sum_cex_quote'] += float(calc['cex_quote'])
-            agg['sum_costs_pnl_quote'] += float(calc['costs_pnl_quote'])
-            agg['sum_pnl_without_hedge_quote'] += float(calc['pnl_without_hedge_quote'])
-            agg['sum_pnl_with_hedge_quote'] += float(calc['pnl_with_hedge_quote'])
-            agg['sum_pool_hold_seconds'] += float(calc['pool_hold_seconds'])
-            if bool(calc['is_finished']):
-                agg['iterations_finished'] += 1
+            self._accumulate_pnl_recalc_agg(agg, calc)
 
         out: List[FrontendPositionRow] = []
         for row in rows:
@@ -778,62 +736,94 @@ class FrontendService:
                 out.append(row)
                 continue
 
-            agg = by_run[run_id]
-            total_quote = float(row.total_quote)
-            if float(total_quote) <= 0.0:
-                raise RuntimeError(f'FrontendService._recalc_positions_from_iterations_raw: total_quote <= 0 for run_id={run_id}')
-
-            pnl_with_hedge_quote = float(agg['sum_pnl_with_hedge_quote'])
-            pnl_without_hedge_quote = float(agg['sum_pnl_without_hedge_quote'])
-            pnl_fees_quote = float(agg['sum_fees_quote'])
-            pnl_fees_il_quote = float(agg['sum_fees_quote']) + float(agg['sum_il_quote'])
-            pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(agg['sum_costs_pnl_quote'])
-            pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(agg['sum_cex_quote'])
-            hold_sec = float(agg['sum_pool_hold_seconds'])
-
-            apr_with_hedge_pct = 0.0
-            apr_without_hedge_pct = 0.0
-            apr_fees_pct = 0.0
-            apr_fees_il_pct = 0.0
-            apr_fees_il_gas_pct = 0.0
-            apr_fees_il_gas_cex_pct = 0.0
-            if float(hold_sec) > 0.0:
-                apr_with_hedge_pct = self._calc_apr(float(pnl_with_hedge_quote), float(total_quote), float(hold_sec))
-                apr_without_hedge_pct = self._calc_apr(float(pnl_without_hedge_quote), float(total_quote), float(hold_sec))
-                apr_fees_pct = self._calc_apr(float(pnl_fees_quote), float(total_quote), float(hold_sec))
-                apr_fees_il_pct = self._calc_apr(float(pnl_fees_il_quote), float(total_quote), float(hold_sec))
-                apr_fees_il_gas_pct = self._calc_apr(float(pnl_fees_il_gas_quote), float(total_quote), float(hold_sec))
-                apr_fees_il_gas_cex_pct = self._calc_apr(float(pnl_fees_il_gas_cex_quote), float(total_quote), float(hold_sec))
-
-            avg_iteration_lifetime_sec = 0.0
-            iterations_finished = int(agg['iterations_finished'])
-            if int(iterations_finished) > 0:
-                avg_iteration_lifetime_sec = float(hold_sec) / float(iterations_finished)
-
-            out.append(row.model_copy(update={
-                'iterations_finished': int(iterations_finished),
-                'avg_iteration_lifetime_sec': float(avg_iteration_lifetime_sec),
-                'pnl_with_hedge_quote': float(pnl_with_hedge_quote),
-                'pnl_without_hedge_quote': float(pnl_without_hedge_quote),
-                'pnl_with_hedge_pct': float(pnl_with_hedge_quote / total_quote * 100.0),
-                'pnl_without_hedge_pct': float(pnl_without_hedge_quote / total_quote * 100.0),
-                'apr_with_hedge_pct': float(apr_with_hedge_pct),
-                'apr_without_hedge_pct': float(apr_without_hedge_pct),
-                'fees_quote': float(agg['sum_fees_quote']),
-                'price_pnl_quote': float(agg['sum_il_quote']),
-                'hedge_pnl_quote': float(agg['sum_cex_quote']),
-                'costs_quote': float(agg['sum_costs_pnl_quote']),
-                'pnl_fees_quote': float(pnl_fees_quote),
-                'pnl_fees_il_quote': float(pnl_fees_il_quote),
-                'pnl_fees_il_gas_quote': float(pnl_fees_il_gas_quote),
-                'pnl_fees_il_gas_cex_quote': float(pnl_fees_il_gas_cex_quote),
-                'apr_fees_pct': float(apr_fees_pct),
-                'apr_fees_il_pct': float(apr_fees_il_pct),
-                'apr_fees_il_gas_pct': float(apr_fees_il_gas_pct),
-                'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex_pct),
-            }))
+            out.append(self._apply_pnl_recalc_to_position_row(row, by_run[run_id], f'_recalc_positions run_id={run_id}'))
 
         return out
+
+    def _init_pnl_recalc_agg(self) -> dict:
+        return {
+            'sum_fees_quote': 0.0,
+            'sum_il_base_delta': 0.0,
+            'sum_il_quote_delta': 0.0,
+            'sum_cex_quote': 0.0,
+            'sum_costs_pnl_quote': 0.0,
+            'sum_pool_hold_seconds': 0.0,
+            'last_valuation_price': 0.0,
+            'iterations_finished': 0,
+        }
+
+    def _accumulate_pnl_recalc_agg(self, agg: dict, calc: dict) -> None:
+        agg['sum_fees_quote'] += float(calc['fees_quote'])
+        agg['sum_il_base_delta'] += float(calc['il_base_delta'])
+        agg['sum_il_quote_delta'] += float(calc['il_quote_delta'])
+        agg['sum_cex_quote'] += float(calc['cex_quote'])
+        agg['sum_costs_pnl_quote'] += float(calc['costs_pnl_quote'])
+        agg['sum_pool_hold_seconds'] += float(calc['pool_hold_seconds'])
+        agg['last_valuation_price'] = float(calc['valuation_price'])
+        if bool(calc['is_finished']):
+            agg['iterations_finished'] += 1
+
+    def _apply_pnl_recalc_to_position_row(self, row: FrontendPositionRow, agg: dict, source_tag: str) -> FrontendPositionRow:
+        total_quote = float(row.total_quote)
+        if float(total_quote) <= 0.0:
+            raise RuntimeError(f'FrontendService.{source_tag}: total_quote <= 0 for run_id={row.run_id}')
+
+        current_price = float(agg['last_valuation_price'])
+        if row.market_price is not None:
+            current_price = float(row.market_price)
+        if float(current_price) <= 0.0:
+            raise RuntimeError(f'FrontendService.{source_tag}: current_price <= 0 for run_id={row.run_id}: {current_price}')
+
+        il_quote = float(agg['sum_il_base_delta']) * float(current_price) + float(agg['sum_il_quote_delta'])
+        pnl_fees_quote = float(agg['sum_fees_quote'])
+        pnl_fees_il_quote = float(pnl_fees_quote) + float(il_quote)
+        pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(agg['sum_costs_pnl_quote'])
+        pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(agg['sum_cex_quote'])
+        pnl_without_hedge_quote = float(pnl_fees_il_gas_quote)
+        pnl_with_hedge_quote = float(pnl_fees_il_gas_cex_quote)
+        hold_sec = float(agg['sum_pool_hold_seconds'])
+
+        apr_with_hedge_pct = 0.0
+        apr_without_hedge_pct = 0.0
+        apr_fees_pct = 0.0
+        apr_fees_il_pct = 0.0
+        apr_fees_il_gas_pct = 0.0
+        apr_fees_il_gas_cex_pct = 0.0
+        if float(hold_sec) > 0.0:
+            apr_with_hedge_pct = self._calc_apr(float(pnl_with_hedge_quote), float(total_quote), float(hold_sec))
+            apr_without_hedge_pct = self._calc_apr(float(pnl_without_hedge_quote), float(total_quote), float(hold_sec))
+            apr_fees_pct = self._calc_apr(float(pnl_fees_quote), float(total_quote), float(hold_sec))
+            apr_fees_il_pct = self._calc_apr(float(pnl_fees_il_quote), float(total_quote), float(hold_sec))
+            apr_fees_il_gas_pct = self._calc_apr(float(pnl_fees_il_gas_quote), float(total_quote), float(hold_sec))
+            apr_fees_il_gas_cex_pct = self._calc_apr(float(pnl_fees_il_gas_cex_quote), float(total_quote), float(hold_sec))
+
+        avg_iteration_lifetime_sec = 0.0
+        iterations_finished = int(agg['iterations_finished'])
+        if int(iterations_finished) > 0:
+            avg_iteration_lifetime_sec = float(hold_sec) / float(iterations_finished)
+
+        return row.model_copy(update={
+            'iterations_finished': int(iterations_finished),
+            'avg_iteration_lifetime_sec': float(avg_iteration_lifetime_sec),
+            'pnl_with_hedge_quote': float(pnl_with_hedge_quote),
+            'pnl_without_hedge_quote': float(pnl_without_hedge_quote),
+            'pnl_with_hedge_pct': float(pnl_with_hedge_quote / total_quote * 100.0),
+            'pnl_without_hedge_pct': float(pnl_without_hedge_quote / total_quote * 100.0),
+            'apr_with_hedge_pct': float(apr_with_hedge_pct),
+            'apr_without_hedge_pct': float(apr_without_hedge_pct),
+            'fees_quote': float(agg['sum_fees_quote']),
+            'price_pnl_quote': float(il_quote),
+            'hedge_pnl_quote': float(agg['sum_cex_quote']),
+            'costs_quote': float(agg['sum_costs_pnl_quote']),
+            'pnl_fees_quote': float(pnl_fees_quote),
+            'pnl_fees_il_quote': float(pnl_fees_il_quote),
+            'pnl_fees_il_gas_quote': float(pnl_fees_il_gas_quote),
+            'pnl_fees_il_gas_cex_quote': float(pnl_fees_il_gas_cex_quote),
+            'apr_fees_pct': float(apr_fees_pct),
+            'apr_fees_il_pct': float(apr_fees_il_pct),
+            'apr_fees_il_gas_pct': float(apr_fees_il_gas_pct),
+            'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex_pct),
+        })
 
     def _calc_iteration_components_from_raw(self, item: dict) -> dict:
         if item is None:
@@ -924,6 +914,8 @@ class FrontendService:
 
         portfolio_before_quote = float(mint_base) * float(valuation_price) + float(mint_quote)
         portfolio_after_quote = float(decrease_base) * float(valuation_price) + float(decrease_quote)
+        il_base_delta = float(decrease_base) - float(mint_base)
+        il_quote_delta = float(decrease_quote) - float(mint_quote)
         il_quote = float(portfolio_after_quote) - float(portfolio_before_quote)
 
         fees_quote = (float(collect_quote) - float(decrease_quote)) + (
@@ -957,12 +949,15 @@ class FrontendService:
             'run_id': str(item['run_id']),
             'is_finished': str(item.get('status', '')) == 'finished',
             'fees_quote': float(fees_quote),
+            'il_base_delta': float(il_base_delta),
+            'il_quote_delta': float(il_quote_delta),
             'il_quote': float(il_quote),
             'cex_quote': float(cex_quote),
             'costs_pnl_quote': float(costs_pnl_quote),
             'pnl_without_hedge_quote': float(pnl_without_hedge_quote),
             'pnl_with_hedge_quote': float(pnl_with_hedge_quote),
             'pool_hold_seconds': float(pool_hold_seconds),
+            'valuation_price': float(valuation_price),
         }
 
     def _build_hedge_chases(self, row: FrontendIterationDoc) -> List[FrontendIterationHedgeChaseRow]:
