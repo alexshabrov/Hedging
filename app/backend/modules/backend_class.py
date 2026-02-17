@@ -18,7 +18,6 @@ from backend.models.backend_models import (
     BackendRunAggregates,
     BackendIterationRecord,
     BackendPositionView,
-    BackendRunDetailsView,
 )
 from backend.modules.hedger_class import Hedger
 from backend.modules.hedger_helper import calc_hedger_pnl_stats
@@ -161,15 +160,6 @@ class Backend:
                 self._logger.error(f'api_positions_archive_failed error={exc} traceback=\n{traceback.format_exc()}')
                 return self._json_response({'ok': False, 'error': str(exc)}, 400)
 
-        @self._app.route('/api/runs/<run_id>', methods=['GET'])
-        def api_run_details(run_id: str) -> Response:
-            try:
-                details = self.get_run_details(str(run_id))
-                return self._json_response({'ok': True, 'item': details.model_dump()}, 200)
-            except Exception as exc:
-                self._logger.error(f'api_run_details_failed run_id={run_id} error={exc} traceback=\n{traceback.format_exc()}')
-                return self._json_response({'ok': False, 'error': str(exc)}, 400)
-
     def _json_response(self, payload: dict, status_code: int) -> Response:
         body = orjson.dumps(payload)
         return Response(response=body, status=int(status_code), mimetype='application/json')
@@ -292,27 +282,6 @@ class Backend:
 
         out.sort(key=lambda x: int(x['finished_at_ms']), reverse=True)
         return out
-
-    def get_run_details(self, run_id: str) -> BackendRunDetailsView:
-        if not isinstance(run_id, str) or len(run_id) == 0:
-            raise RuntimeError('Backend.get_run_details: run_id is empty')
-
-        with self._lock:
-            if run_id not in self._runs:
-                raise RuntimeError(f'Backend.get_run_details: run not found: {run_id}')
-            ctx = self._runs[run_id]
-
-        with ctx.lock:
-            iterations = []
-            for item in ctx.iterations:
-                iterations.append(item)
-
-        return BackendRunDetailsView(
-            template_id=None if ctx.template_id is None else str(ctx.template_id),
-            config=ctx.config,
-            position=self._build_position_view(ctx),
-            iterations=iterations,
-        )
 
     def _build_position_view(self, ctx: BackendRunContext) -> BackendPositionView:
         with ctx.lock:
