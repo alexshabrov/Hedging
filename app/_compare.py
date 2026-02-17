@@ -415,7 +415,8 @@ def build_dashboard_totals(recalc_rows: List[RecalcPosition], by_run: Dict[str, 
             active_runs += 1
 
         finished_iterations += int(row.iterations_finished)
-        total_invested_quote += float(row.total_quote)
+        # Sequential-run dashboard capital base: reuse working capital across runs.
+        total_invested_quote = max(float(total_invested_quote), float(row.total_quote))
         total_pnl_with_hedge_quote += float(row.pnl_with_hedge_quote)
         total_pnl_without_hedge_quote += float(row.pnl_without_hedge_quote)
         total_costs_quote += float(row.costs_quote)
@@ -577,7 +578,7 @@ def print_report(
     print("")
 
     print("=== APR BASE COMPARISON ===")
-    print(f"dashboard APR capital base       {_fmt(totals.total_invested_quote)} (sum total_quote across rows)")
+    print(f"dashboard APR capital base       {_fmt(totals.total_invested_quote)} (max total_quote across rows)")
     print(f"out APR capital base             {_fmt(out_summary['capital_quote'])} (wallet start balances)")
     print(f"dashboard hold seconds           {_fmt(totals.total_hold_seconds)} (sum per-iteration hold)")
     print(f"out hold seconds                 {_fmt(out_summary['hold_time_seconds'])} (first tx -> last tx)")
@@ -619,7 +620,7 @@ def print_report(
     print("=== NOTES ===")
     print("- Dashboard includes CEX PnL from hedger snapshots; out.txt uses cex_quote=0 by design.")
     print("- Dashboard costs include gas + swap_cost_quote; out.txt chain currently uses gas only.")
-    print("- Dashboard APR base uses sum(total_quote) and sum(pool_hold_seconds).")
+    print("- Dashboard APR base uses max(total_quote) and sum(pool_hold_seconds).")
     print("- out.txt APR base uses wallet start capital and wall-clock tx span.")
     print("- Live dashboard may differ slightly from this script for active runs because UI can use runtime market price not stored in Mongo.")
 

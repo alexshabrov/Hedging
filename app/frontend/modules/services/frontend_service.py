@@ -386,7 +386,9 @@ class FrontendService:
                 active_runs += 1
 
             finished_iterations += int(row.iterations_finished)
-            total_invested_quote += float(row.total_quote)
+            # Dashboard assumes runs are sequential and reuse the same working capital.
+            # Use the working-capital base (max run quote), not sum across runs.
+            total_invested_quote = max(float(total_invested_quote), float(row.total_quote))
             total_pnl_with_hedge_quote += float(row.pnl_with_hedge_quote)
             total_pnl_without_hedge_quote += float(row.pnl_without_hedge_quote)
             # Frontend row stores costs as signed PnL component (usually negative).
@@ -414,7 +416,7 @@ class FrontendService:
                 float(total_hold_seconds),
             )
 
-        # Keep dashboard "Average APR per run" aligned with sum/sum methodology.
+        # Keep dashboard "Average APR per run" aligned with dashboard methodology.
         avg_apr_with_hedge_pct = float(apr_with_hedge_pct)
 
         avg_iteration_lifetime_sec = 0.0

@@ -206,13 +206,13 @@
                                 </tr>
                                 <tr>
                                     <td>APR with hedge (%)</td>
-                                    <td><code>calc_apr(sum(pnl_with_hedge_quote), sum(total_quote), sum(pool_hold_seconds))</code></td>
-                                    <td>APR с hedge через агрегированные суммы PnL/капитала/времени.</td>
+                                    <td><code>calc_apr(sum(pnl_with_hedge_quote), max(total_quote), sum(pool_hold_seconds))</code></td>
+                                    <td>APR с hedge для последовательных run: общий PnL делится на рабочий капитал (max total_quote) и суммарное время.</td>
                                 </tr>
                                 <tr>
                                     <td>APR without hedge (%)</td>
-                                    <td><code>calc_apr(sum(pnl_without_hedge_quote), sum(total_quote), sum(pool_hold_seconds))</code></td>
-                                    <td>APR без hedge через агрегированные суммы PnL/капитала/времени.</td>
+                                    <td><code>calc_apr(sum(pnl_without_hedge_quote), max(total_quote), sum(pool_hold_seconds))</code></td>
+                                    <td>APR без hedge для последовательных run: рабочий капитал не суммируется между run.</td>
                                 </tr>
                                 <tr>
                                     <td>Average iteration lifetime (sec)</td>
