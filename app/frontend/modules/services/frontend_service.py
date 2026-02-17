@@ -727,6 +727,7 @@ class FrontendService:
             'sum_costs_pnl_quote': 0.0,
             'sum_pool_hold_seconds': 0.0,
             'last_valuation_price': 0.0,
+            'last_token_id': None,
             'iterations_finished': 0,
         }
 
@@ -738,6 +739,8 @@ class FrontendService:
         agg['sum_costs_pnl_quote'] += float(calc['costs_pnl_quote'])
         agg['sum_pool_hold_seconds'] += float(calc['pool_hold_seconds'])
         agg['last_valuation_price'] = float(calc['valuation_price'])
+        if calc['token_id'] is not None:
+            agg['last_token_id'] = int(calc['token_id'])
         if bool(calc['is_finished']):
             agg['iterations_finished'] += 1
 
@@ -780,6 +783,16 @@ class FrontendService:
         if int(iterations_finished) > 0:
             avg_iteration_lifetime_sec = float(hold_sec) / float(iterations_finished)
 
+        token_id = row.token_id
+        if token_id is None and agg['last_token_id'] is not None:
+            token_id = int(agg['last_token_id'])
+        pool_url = row.pool_url
+        revert_link = row.revert_link
+        if token_id is not None and int(token_id) > 0:
+            network_key = str(row.network).lower()
+            pool_url = f'https://app.uniswap.org/positions/v3/{network_key}/{int(token_id)}'
+            revert_link = f'https://revert.finance/#/uniswap-position/{network_key}/{int(token_id)}'
+
         return row.model_copy(update={
             'iterations_finished': int(iterations_finished),
             'avg_iteration_lifetime_sec': float(avg_iteration_lifetime_sec),
@@ -801,6 +814,9 @@ class FrontendService:
             'apr_fees_il_pct': float(apr_fees_il_pct),
             'apr_fees_il_gas_pct': float(apr_fees_il_gas_pct),
             'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex_pct),
+            'token_id': None if token_id is None else int(token_id),
+            'pool_url': pool_url,
+            'revert_link': revert_link,
         })
 
     def _calc_iteration_components_from_raw(self, item: dict) -> dict:
@@ -926,6 +942,7 @@ class FrontendService:
         return {
             'run_id': str(item['run_id']),
             'is_finished': str(item.get('status', '')) == 'finished',
+            'token_id': None if uniswap.get('token_id') is None else int(uniswap.get('token_id')),
             'fees_quote': float(fees_quote),
             'il_base_delta': float(il_base_delta),
             'il_quote_delta': float(il_quote_delta),
