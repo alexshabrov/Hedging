@@ -930,11 +930,9 @@ class FrontendService:
         cex_units = int(metrics.get('realized_pnl_quote_units', 0)) + int(metrics.get('unrealized_pnl_quote_units', 0))
         cex_quote = float(cex_units) * float(quote_per_cex_unit)
 
-        portfolio_before_quote = float(mint_base) * float(valuation_price) + float(mint_quote)
-        portfolio_after_quote = float(decrease_base) * float(valuation_price) + float(decrease_quote)
         il_base_delta = float(decrease_base) - float(mint_base)
         il_quote_delta = float(decrease_quote) - float(mint_quote)
-        il_quote = float(portfolio_after_quote) - float(portfolio_before_quote)
+        il_quote = float(il_base_delta) * float(valuation_price) + float(il_quote_delta)
 
         fees_quote = (float(collect_quote) - float(decrease_quote)) + (
             (float(collect_base) - float(decrease_base)) * float(valuation_price)

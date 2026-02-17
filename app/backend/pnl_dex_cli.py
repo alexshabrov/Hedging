@@ -7,6 +7,7 @@ import argparse, requests, time
 from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
 from web3 import Web3
+from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
 from live.lib.strict_model import StrictModel
@@ -82,6 +83,9 @@ NETWORK_UNISWAP_ROUTERS: Dict[str, List[str]] = {
         '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD',
     ],
 }
+
+ACTIVE_POSITIONS_COLLECTION = 'backend_positions_active'
+ARCHIVE_POSITIONS_COLLECTION = 'backend_positions_archive'
 
 TRANSFER_TOPIC = Web3.to_hex(Web3.keccak(text='Transfer(address,address,uint256)'))
 INCREASE_LIQ_TOPIC = Web3.to_hex(Web3.keccak(text='IncreaseLiquidity(uint256,uint128,uint256,uint256)'))
@@ -309,6 +313,26 @@ class PnlBreakdown(StrictModel):
     swaps: TokenDelta
     gas_eth: float
     gas_usdc: float
+    current_price: float
+    sum_base_delta: float
+    sum_quote_delta: float
+    il_quote: float
+    costs_pnl_quote: float
+    cex_quote: float
+    pnl_fees_quote: float
+    pnl_fees_il_quote: float
+    pnl_fees_il_gas_quote: float
+    pnl_fees_il_gas_cex_quote: float
+    pnl_with_hedge_quote: float
+    pnl_without_hedge_quote: float
+    hold_time_seconds: float
+    capital_quote: float
+    apr_fees_pct: float
+    apr_fees_il_pct: float
+    apr_fees_il_gas_pct: float
+    apr_fees_il_gas_cex_pct: float
+    apr_with_hedge_pct: float
+    apr_without_hedge_pct: float
     pnl_usdc_by_components: float
 
 
@@ -347,6 +371,8 @@ def parse_args():
     p.add_argument('--to-block', type=int)
     p.add_argument('--binance-symbol', default='ETHUSDT')
     p.add_argument('--alchemy-page-size', type=int, default=1000)
+    p.add_argument('--mongo-uri', type=str, default='mongodb://hedging_mongo:27017')
+    p.add_argument('--mongo-db', type=str, default='hedging')
 
     return p.parse_args()
 
@@ -409,6 +435,52 @@ def _avg_quote_cost_per_base(base_accum: float, quote_accum: float) -> float:
     if abs(float(base_accum)) <= 1e-18:
         raise RuntimeError(f'cannot compute avg quote/base cost with base_accum={base_accum}')
     return float(quote_accum) / float(base_accum)
+
+
+def _load_first_position_started_at_ms(mongo_uri: str, mongo_db: str) -> int:
+    if not isinstance(mongo_uri, str) or len(mongo_uri) == 0:
+        raise RuntimeError('mongo_uri is empty')
+    if not isinstance(mongo_db, str) or len(mongo_db) == 0:
+        raise RuntimeError('mongo_db is empty')
+
+    client = MongoClient(str(mongo_uri), serverSelectionTimeoutMS=5000)
+    try:
+        _ = client.server_info()
+        db = client[str(mongo_db)]
+        best_started_at_ms: Optional[int] = None
+
+        for col_name in [ACTIVE_POSITIONS_COLLECTION, ARCHIVE_POSITIONS_COLLECTION]:
+            col = db[str(col_name)]
+            doc = col.find_one(
+                {'started_at_ms': {'$exists': True, '$ne': None}},
+                {'_id': 0, 'started_at_ms': 1},
+                sort=[('started_at_ms', 1)],
+            )
+            if doc is None:
+                continue
+            started_at_ms = int(doc['started_at_ms'])
+            if int(started_at_ms) <= 0:
+                continue
+            if best_started_at_ms is None or int(started_at_ms) < int(best_started_at_ms):
+                best_started_at_ms = int(started_at_ms)
+
+        if best_started_at_ms is None:
+            raise RuntimeError(
+                f'no positions with started_at_ms found in collections: '
+                f'{ACTIVE_POSITIONS_COLLECTION}, {ARCHIVE_POSITIONS_COLLECTION}'
+            )
+        return int(best_started_at_ms)
+    finally:
+        client.close()
+
+
+def _calc_apr(pnl_quote: float, capital_quote: float, hold_seconds: float) -> float:
+    if float(capital_quote) <= 0.0:
+        return 0.0
+    if float(hold_seconds) <= 0.0:
+        return 0.0
+    seconds_per_year = 365.0 * 24.0 * 60.0 * 60.0
+    return (float(pnl_quote) / float(capital_quote)) * (float(seconds_per_year) / float(hold_seconds)) * 100.0
 
 
 def _topic_to_address(topic_hex: str) -> str:
@@ -912,7 +984,20 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
     )
 
 
-def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: TokenMeta, tx_hashes: List[str], npm_address: str, router_set: Set[str], pool_address: str, token0_address: str, eth_price: float) -> HistoryReport:
+def _build_report(
+    w3: Web3,
+    args,
+    logger,
+    weth_token: TokenMeta,
+    usdc_token: TokenMeta,
+    tx_hashes: List[str],
+    npm_address: str,
+    router_set: Set[str],
+    pool_address: str,
+    token0_address: str,
+    eth_price: float,
+    cutoff_started_at_ms: int,
+) -> HistoryReport:
     t_report_start = time.perf_counter()
     wallet_lc = str(args.wallet_address).lower()
     npm_lc = str(npm_address).lower()
@@ -954,6 +1039,12 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
             )
 
     txs.sort(key=lambda x: (int(x.block_number), int(x.tx_index), str(x.tx_hash)))
+    txs_before_cutoff = len(txs)
+    txs = [tx for tx in txs if int(tx.timestamp_ms) >= int(cutoff_started_at_ms)]
+    logger.info(
+        f'history_cutoff_applied cutoff_started_at_ms={cutoff_started_at_ms} '
+        f'kept={len(txs)} dropped={int(txs_before_cutoff) - len(txs)}'
+    )
     logger.info(f'history_wallet_txs_loaded n={len(txs)} elapsed_sec={time.perf_counter() - t_decode_start:.2f}')
 
     first_tx_block = int(args.to_block) if len(txs) == 0 else int(txs[0].block_number)
@@ -1180,36 +1271,51 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
     il_weth = float(realized_il_weth)
     il_usdc = float(realized_il_usdc)
     gas_usdc = float(sum_gas_eth) * float(eth_price)
-    fees_quote = _to_quote_pnl(float(fees_weth), float(fees_usdc), float(eth_price))
-    il_quote = (
-        _portfolio_quote_value(
-            base_amount=float(sum_decrease_weth),
-            quote_amount=float(sum_decrease_usdc),
-            valuation_price=float(eth_price),
-        )
-        - _portfolio_quote_value(
-            base_amount=float(sum_closed_principal_weth),
-            quote_amount=float(sum_closed_principal_usdc),
-            valuation_price=float(eth_price),
-        )
-    )
-    swaps_quote = _to_quote_pnl(float(sum_swap_weth), float(sum_swap_usdc), float(eth_price))
+    current_price = float(eth_price)
+    sum_base_delta = float(sum_decrease_weth) - float(sum_closed_principal_weth)
+    sum_quote_delta = float(sum_decrease_usdc) - float(sum_closed_principal_usdc)
+    fees_quote = _to_quote_pnl(float(fees_weth), float(fees_usdc), float(current_price))
+    il_quote = float(sum_base_delta) * float(current_price) + float(sum_quote_delta)
+
+    # Keep swap delta for diagnostics only; frontend "costs" chain is gas/swap-cost signed PnL.
+    swaps_quote = _to_quote_pnl(float(sum_swap_weth), float(sum_swap_usdc), float(current_price))
+    cex_quote = 0.0
+    costs_pnl_quote = -float(gas_usdc)
+    pnl_fees_quote = float(fees_quote)
+    pnl_fees_il_quote = float(pnl_fees_quote) + float(il_quote)
+    pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(costs_pnl_quote)
+    pnl_fees_il_gas_cex_quote = float(pnl_fees_il_gas_quote) + float(cex_quote)
+    pnl_without_hedge_quote = float(pnl_fees_il_gas_quote)
+    pnl_with_hedge_quote = float(pnl_fees_il_gas_cex_quote)
+
+    hold_time_seconds = 0.0
+    if len(txs) > 1:
+        ts_first = int(txs[0].timestamp_ms)
+        ts_last = int(txs[-1].timestamp_ms)
+        if int(ts_last) > int(ts_first):
+            hold_time_seconds = float(int(ts_last) - int(ts_first)) / 1000.0
+    capital_quote = float(start_usdc) + float(start_weth) * float(current_price)
+    apr_fees_pct = _calc_apr(float(pnl_fees_quote), float(capital_quote), float(hold_time_seconds))
+    apr_fees_il_pct = _calc_apr(float(pnl_fees_il_quote), float(capital_quote), float(hold_time_seconds))
+    apr_fees_il_gas_pct = _calc_apr(float(pnl_fees_il_gas_quote), float(capital_quote), float(hold_time_seconds))
+    apr_fees_il_gas_cex_pct = _calc_apr(float(pnl_fees_il_gas_cex_quote), float(capital_quote), float(hold_time_seconds))
+    apr_with_hedge_pct = float(apr_fees_il_gas_cex_pct)
+    apr_without_hedge_pct = float(apr_fees_il_gas_pct)
 
     pnl_by_components = (
-        float(fees_quote)
-        + float(il_quote)
-        + float(swaps_quote)
-        - float(gas_usdc)
+        float(pnl_with_hedge_quote)
     )
     pnl_by_balances = (
-        (float(end_usdc) + float(end_weth) * float(eth_price))
-        - (float(start_usdc) + float(start_weth) * float(eth_price))
+        (float(end_usdc) + float(end_weth) * float(current_price))
+        - (float(start_usdc) + float(start_weth) * float(current_price))
     )
 
     logger.info(
         f'build_report_done txs={len(txs)} swaps={n_swaps} '
         f'fees_weth={fees_weth:.8f} fees_usdc={fees_usdc:.8f} '
         f'il_weth={il_weth:.8f} il_usdc={il_usdc:.8f} '
+        f'fees_quote={pnl_fees_quote:.8f} il_quote={il_quote:.8f} costs_pnl_quote={costs_pnl_quote:.8f} '
+        f'pnl_without_hedge={pnl_without_hedge_quote:.8f} pnl_with_hedge={pnl_with_hedge_quote:.8f} '
         f'pnl_components_usdc={pnl_by_components:.8f} pnl_balances_usdc={pnl_by_balances:.8f} '
         f'elapsed_sec={time.perf_counter() - t_report_start:.2f}'
     )
@@ -1234,6 +1340,26 @@ def _build_report(w3: Web3, args, logger, weth_token: TokenMeta, usdc_token: Tok
             swaps=TokenDelta(weth=float(sum_swap_weth), usdc=float(sum_swap_usdc)),
             gas_eth=float(sum_gas_eth),
             gas_usdc=float(gas_usdc),
+            current_price=float(current_price),
+            sum_base_delta=float(sum_base_delta),
+            sum_quote_delta=float(sum_quote_delta),
+            il_quote=float(il_quote),
+            costs_pnl_quote=float(costs_pnl_quote),
+            cex_quote=float(cex_quote),
+            pnl_fees_quote=float(pnl_fees_quote),
+            pnl_fees_il_quote=float(pnl_fees_il_quote),
+            pnl_fees_il_gas_quote=float(pnl_fees_il_gas_quote),
+            pnl_fees_il_gas_cex_quote=float(pnl_fees_il_gas_cex_quote),
+            pnl_with_hedge_quote=float(pnl_with_hedge_quote),
+            pnl_without_hedge_quote=float(pnl_without_hedge_quote),
+            hold_time_seconds=float(hold_time_seconds),
+            capital_quote=float(capital_quote),
+            apr_fees_pct=float(apr_fees_pct),
+            apr_fees_il_pct=float(apr_fees_il_pct),
+            apr_fees_il_gas_pct=float(apr_fees_il_gas_pct),
+            apr_fees_il_gas_cex_pct=float(apr_fees_il_gas_cex_pct),
+            apr_with_hedge_pct=float(apr_with_hedge_pct),
+            apr_without_hedge_pct=float(apr_without_hedge_pct),
             pnl_usdc_by_components=float(pnl_by_components),
         ),
         pnl_usdc_by_balances=float(pnl_by_balances),
@@ -1259,6 +1385,10 @@ def main() -> None:
         raise RuntimeError('pool_address is empty')
     if int(args.alchemy_page_size) <= 0:
         raise RuntimeError('alchemy_page_size must be > 0')
+    if not isinstance(args.mongo_uri, str) or len(args.mongo_uri) == 0:
+        raise RuntimeError('mongo_uri is empty')
+    if not isinstance(args.mongo_db, str) or len(args.mongo_db) == 0:
+        raise RuntimeError('mongo_db is empty')
 
     network_lc = str(args.network).lower()
     if network_lc not in NETWORK_NPM:
@@ -1352,6 +1482,16 @@ def main() -> None:
     eth_price = _get_eth_price_usdt(str(args.binance_symbol))
     logger.info(f'binance_price_loaded symbol={args.binance_symbol} price={eth_price:.8f} elapsed_sec={time.perf_counter() - t_price_start:.2f}')
 
+    t_cutoff_start = time.perf_counter()
+    first_position_started_at_ms = _load_first_position_started_at_ms(
+        mongo_uri=str(args.mongo_uri),
+        mongo_db=str(args.mongo_db),
+    )
+    logger.info(
+        f'first_position_started_at_loaded ms={first_position_started_at_ms} '
+        f'elapsed_sec={time.perf_counter() - t_cutoff_start:.2f}'
+    )
+
     t_build_start = time.perf_counter()
     report = _build_report(
         w3=w3,
@@ -1365,6 +1505,7 @@ def main() -> None:
         pool_address=str(pool_checksum),
         token0_address=str(token0.address),
         eth_price=float(eth_price),
+        cutoff_started_at_ms=int(first_position_started_at_ms),
     )
     logger.info(
         f'report_ready txs={report.transactions_total} swaps={report.uniswap_swaps_total} '
@@ -1411,8 +1552,30 @@ def main() -> None:
     )
     print(f'Fees from pool: WETH={report.pnl.fees.weth:.8f}, USDC={report.pnl.fees.usdc:.8f}, PnL(USDC)={fees_pnl_usdc:.8f}')
     print(f'Realized IL:    WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f}, PnL(USDC)={realized_il_pnl_usdc:.8f}')
-    print(f'Uniswap swaps:  WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
+    print(f'Uniswap swaps (diag only): WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
     print(f'Gas (add/remove/collect/rebalance): ETH={report.pnl.gas_eth:.8f}, USDC={report.pnl.gas_usdc:.8f}')
+    print('')
+    print('Frontend-compatible chain:')
+    print(f'  current_price:              {report.pnl.current_price:.8f} (единая текущая цена оценки для всего расчета, P_current)')
+    print(f'  sum_base_delta:             {report.pnl.sum_base_delta:.8f} (сумма по итерациям: base1 - base0)')
+    print(f'  sum_quote_delta:            {report.pnl.sum_quote_delta:.8f} (сумма по итерациям: quote1 - quote0)')
+    print(f'  il_quote:                   {report.pnl.il_quote:.8f} (IL_run = sum_base_delta * current_price + sum_quote_delta)')
+    print(f'  pnl_fees_quote:             {report.pnl.pnl_fees_quote:.8f} (PnL_fees = Σ fees, только чистые комиссии)')
+    print(f'  pnl_fees_il_quote:          {report.pnl.pnl_fees_il_quote:.8f} (PnL_fees_il = pnl_fees_quote + il_quote)')
+    print(f'  costs_pnl_quote (signed):   {report.pnl.costs_pnl_quote:.8f} (Σ costs как signed PnL-компонент издержек)')
+    print(f'  pnl_fees_il_gas_quote:      {report.pnl.pnl_fees_il_gas_quote:.8f} (PnL_fees_il_gas = pnl_fees_il_quote + costs_pnl_quote)')
+    print(f'  cex_quote:                  {report.pnl.cex_quote:.8f} (Σ cex, PnL хеджа)')
+    print(f'  pnl_fees_il_gas_cex_quote:  {report.pnl.pnl_fees_il_gas_cex_quote:.8f} (PnL_with_hedge = pnl_fees_il_gas_quote + cex_quote)')
+    print(f'  pnl_without_hedge_quote:    {report.pnl.pnl_without_hedge_quote:.8f} (итог без хеджа, равен pnl_fees_il_gas_quote)')
+    print(f'  pnl_with_hedge_quote:       {report.pnl.pnl_with_hedge_quote:.8f} (итог с хеджем, равен pnl_fees_il_gas_cex_quote)')
+    print(f'  capital_quote:              {report.pnl.capital_quote:.8f} (суммарный капитал в quote для APR)')
+    print(f'  hold_time_seconds:          {report.pnl.hold_time_seconds:.8f} (суммарное время удержания для APR, сек)')
+    print(f'  apr_fees_pct:               {report.pnl.apr_fees_pct:.8f} (APR(pnl_fees_quote, capital_quote, hold_time_seconds))')
+    print(f'  apr_fees_il_pct:            {report.pnl.apr_fees_il_pct:.8f} (APR(pnl_fees_il_quote, capital_quote, hold_time_seconds))')
+    print(f'  apr_fees_il_gas_pct:        {report.pnl.apr_fees_il_gas_pct:.8f} (APR(pnl_fees_il_gas_quote, capital_quote, hold_time_seconds))')
+    print(f'  apr_fees_il_gas_cex_pct:    {report.pnl.apr_fees_il_gas_cex_pct:.8f} (APR(pnl_fees_il_gas_cex_quote, capital_quote, hold_time_seconds))')
+    print(f'  apr_without_hedge_pct:      {report.pnl.apr_without_hedge_pct:.8f} (APR(pnl_without_hedge_quote, capital_quote, hold_time_seconds))')
+    print(f'  apr_with_hedge_pct:         {report.pnl.apr_with_hedge_pct:.8f} (APR(pnl_with_hedge_quote, capital_quote, hold_time_seconds))')
     print('')
     print(f'PnL by components (USDC): {report.pnl.pnl_usdc_by_components:.8f}')
     print(f'PnL by balances   (USDC): {report.pnl_usdc_by_balances:.8f}')

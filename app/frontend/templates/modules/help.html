@@ -133,7 +133,7 @@
                                     <td>DEX price PnL</td>
                                     <td>
                                         <code>
-                                            dex_realized_il_quote = (decrease_base * valuation_price + decrease_quote) - (mint_base * valuation_price + mint_quote)
+                                            dex_realized_il_quote = (decrease_base - mint_base) * valuation_price + (decrease_quote - mint_quote)
                                         </code>
                                     </td>
                                     <td>Результат ценового движения LP-позиции.</td>

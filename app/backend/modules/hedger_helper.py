@@ -123,9 +123,9 @@ def calc_hedger_pnl_stats(stats: HedgerStats) -> HedgerPnlStats:
     collect_quote = _to_optional_float(collect.amount_quote)
     collect_base = _to_optional_float(collect.amount_base)
 
-    portfolio_before_quote = float(mint_base) * float(valuation_price) + float(mint_quote)
-    portfolio_after_quote = float(decrease_base) * float(valuation_price) + float(decrease_quote)
-    dex_realized_il_quote = float(portfolio_after_quote) - float(portfolio_before_quote)
+    il_base_delta = float(decrease_base) - float(mint_base)
+    il_quote_delta = float(decrease_quote) - float(mint_quote)
+    dex_realized_il_quote = float(il_base_delta) * float(valuation_price) + float(il_quote_delta)
     # collect_fees returns full owed tokens (including principal moved into owed after decrease).
     # Net fees are the part above decrease amounts.
     fees_received_quote = (
