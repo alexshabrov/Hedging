@@ -393,6 +393,8 @@ class Backend:
                 symbol=str(ctx.config.symbol),
                 template_id=None if ctx.template_id is None else str(ctx.template_id),
             )
+            # Keep active position doc in sync with backend_run_tokens right away.
+            self._write_position_active_doc(ctx)
         except Exception as exc:
             self._logger.warning(f'backend_save_run_token_skipped run_id={ctx.run_id} error={exc}')
 
