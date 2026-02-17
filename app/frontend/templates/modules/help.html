@@ -206,18 +206,13 @@
                                 </tr>
                                 <tr>
                                     <td>APR with hedge (%)</td>
-                                    <td><code>sum(apr_with_hedge_pct * total_quote) / sum(total_quote)</code></td>
-                                    <td>Взвешенный APR с hedge.</td>
+                                    <td><code>calc_apr(sum(pnl_with_hedge_quote), sum(total_quote), sum(pool_hold_seconds))</code></td>
+                                    <td>APR с hedge через агрегированные суммы PnL/капитала/времени.</td>
                                 </tr>
                                 <tr>
                                     <td>APR without hedge (%)</td>
-                                    <td><code>sum(apr_without_hedge_pct * total_quote) / sum(total_quote)</code></td>
-                                    <td>Взвешенный APR без hedge.</td>
-                                </tr>
-                                <tr>
-                                    <td>Average APR per run (%)</td>
-                                    <td><code>sum(apr_with_hedge_pct) / N</code></td>
-                                    <td>Простой средний APR по запускам (без взвешивания на капитал).</td>
+                                    <td><code>calc_apr(sum(pnl_without_hedge_quote), sum(total_quote), sum(pool_hold_seconds))</code></td>
+                                    <td>APR без hedge через агрегированные суммы PnL/капитала/времени.</td>
                                 </tr>
                                 <tr>
                                     <td>Average iteration lifetime (sec)</td>

@@ -377,12 +377,9 @@ class FrontendService:
         total_pnl_with_hedge_quote = 0.0
         total_pnl_without_hedge_quote = 0.0
         total_costs_quote = 0.0
-        weighted_apr_with = 0.0
-        weighted_apr_without = 0.0
-        avg_apr_sum = 0.0
-        avg_apr_n = 0
         hold_seconds_sum = 0.0
         hold_seconds_n = 0
+        total_hold_seconds = 0.0
 
         for row in positions:
             if row.status in [BackendRunLifecycle.INITIALIZED, BackendRunLifecycle.RUNNING, BackendRunLifecycle.STOPPING]:
@@ -395,29 +392,30 @@ class FrontendService:
             # Frontend row stores costs as signed PnL component (usually negative).
             total_costs_quote += float(row.costs_quote)
 
-            if float(row.total_quote) > 0.0:
-                weighted_apr_with += float(row.apr_with_hedge_pct) * float(row.total_quote)
-                weighted_apr_without += float(row.apr_without_hedge_pct) * float(row.total_quote)
-
-            avg_apr_sum += float(row.apr_with_hedge_pct)
-            avg_apr_n += 1
-
             if float(row.avg_iteration_lifetime_sec) > 0.0:
                 hold_seconds_sum += float(row.avg_iteration_lifetime_sec)
                 hold_seconds_n += 1
+            total_hold_seconds += float(row.avg_iteration_lifetime_sec) * float(row.iterations_finished)
 
         if float(total_invested_quote) <= 0.0 and len(positions) > 0:
             raise RuntimeError('FrontendService.build_dashboard: total_invested_quote <= 0 for non-empty positions')
 
         apr_with_hedge_pct = 0.0
         apr_without_hedge_pct = 0.0
-        if float(total_invested_quote) > 0.0:
-            apr_with_hedge_pct = float(weighted_apr_with) / float(total_invested_quote)
-            apr_without_hedge_pct = float(weighted_apr_without) / float(total_invested_quote)
+        if float(total_invested_quote) > 0.0 and float(total_hold_seconds) > 0.0:
+            apr_with_hedge_pct = self._calc_apr(
+                float(total_pnl_with_hedge_quote),
+                float(total_invested_quote),
+                float(total_hold_seconds),
+            )
+            apr_without_hedge_pct = self._calc_apr(
+                float(total_pnl_without_hedge_quote),
+                float(total_invested_quote),
+                float(total_hold_seconds),
+            )
 
-        avg_apr_with_hedge_pct = 0.0
-        if int(avg_apr_n) > 0:
-            avg_apr_with_hedge_pct = float(avg_apr_sum) / float(avg_apr_n)
+        # Keep dashboard "Average APR per run" aligned with sum/sum methodology.
+        avg_apr_with_hedge_pct = float(apr_with_hedge_pct)
 
         avg_iteration_lifetime_sec = 0.0
         if int(hold_seconds_n) > 0:
