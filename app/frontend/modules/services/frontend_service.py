@@ -6,11 +6,12 @@ Version: 3.0
 import re
 import time, uuid
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
 from backend.models.hedger_models import HedgerConfig, CexTriggerMode, MockRealtimeSource
+from backend.models.mock_hedge_models import MockHedgeBoundary
 from frontend.modules.models.frontend_models import (
     FrontendCreateTemplateForm,
     FrontendActivePositionDoc,
@@ -648,6 +649,8 @@ class FrontendService:
             pool_url = f'https://app.uniswap.org/positions/v3/{network_key}/{int(token_id)}'
             revert_link = f'https://revert.finance/#/uniswap-position/{network_key}/{int(token_id)}'
 
+        close_trigger_side = self._derive_close_trigger_side_for_view(row)
+
         return FrontendIterationRow(
             id=str(row.id),
             run_id=str(row.run_id),
@@ -657,7 +660,7 @@ class FrontendService:
             runtime_sec=float(runtime_sec),
             status=str(row.status),
             close_reason=close_reason,
-            close_trigger_side=row.close_trigger_side,
+            close_trigger_side=close_trigger_side,
             total_quote=float(total_quote),
             price_lower=float(calc.price_lower),
             price_upper=float(calc.price_upper),
@@ -762,6 +765,8 @@ class FrontendService:
         if bool(activated):
             activation_price = float(calc.base_price)
 
+        close_trigger_side = self._derive_close_trigger_side_for_view(row)
+
         return FrontendIterationHedgeBlock(
             activated=bool(activated),
             activation_price=activation_price,
@@ -774,8 +779,58 @@ class FrontendService:
             opened_ms=int(opened_ms),
             closed_ms=int(closed_ms),
             close_reason=close_reason,
-            close_trigger_side=row.close_trigger_side,
+            close_trigger_side=close_trigger_side,
         )
+
+    def _derive_close_trigger_side_for_view(self, row: FrontendIterationDoc) -> Optional[MockHedgeBoundary]:
+        if row is None:
+            raise RuntimeError('FrontendService._derive_close_trigger_side_for_view: row is None')
+        if not isinstance(row, FrontendIterationDoc):
+            raise RuntimeError(f'FrontendService._derive_close_trigger_side_for_view: row is not FrontendIterationDoc: {type(row)}')
+
+        if row.close_trigger_side is not None:
+            return row.close_trigger_side
+
+        snap = row.stats.live.last_snapshot
+        if snap is None:
+            return None
+        if snap.close_reason is None:
+            return None
+
+        close_reason = str(snap.close_reason)
+        if close_reason == 'mock_upper':
+            return MockHedgeBoundary.UPPER
+        if close_reason == 'mock_lower':
+            return MockHedgeBoundary.LOWER
+
+        if close_reason == 'target':
+            if snap.opened_leg is None:
+                raise RuntimeError(
+                    'FrontendService._derive_close_trigger_side_for_view: opened_leg is None for target close_reason'
+                )
+
+            opened_leg = str(snap.opened_leg)
+            if opened_leg == 'long':
+                return MockHedgeBoundary.UPPER
+            if opened_leg == 'short':
+                return MockHedgeBoundary.LOWER
+            raise RuntimeError(
+                'FrontendService._derive_close_trigger_side_for_view: unsupported opened_leg for target close_reason: '
+                f'{opened_leg}'
+            )
+
+        if close_reason == 'neutral':
+            return None
+        if close_reason == 'forced':
+            return None
+        if close_reason == 'manual_stop':
+            return None
+        if close_reason == 'mock_closed':
+            return None
+        if close_reason == 'mock_failed':
+            return None
+
+        raise RuntimeError(f'FrontendService._derive_close_trigger_side_for_view: unsupported close_reason: {close_reason}')
 
     def _build_rebalance_block(self, row: FrontendIterationDoc) -> FrontendIterationRebalanceBlock:
         rebalance = row.stats.uniswap.rebalance
