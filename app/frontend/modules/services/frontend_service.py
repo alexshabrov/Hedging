@@ -11,7 +11,6 @@ from typing import Dict, List
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
 from backend.models.hedger_models import HedgerConfig, CexTriggerMode, MockRealtimeSource
-from backend.models.mock_hedge_models import MockHedgeBoundary
 from frontend.modules.models.frontend_models import (
     FrontendCreateTemplateForm,
     FrontendActivePositionDoc,
@@ -985,6 +984,12 @@ class FrontendService:
         decrease = uniswap.decrease
         collect = uniswap.collect
 
+        base_price = float(calc.base_price)
+        if float(base_price) <= 0.0:
+            raise RuntimeError(f'FrontendService._derive_iteration_components: bad base_price: {base_price}')
+
+        mint_base = 0.0 if mint.amount_base is None else float(mint.amount_base)
+        mint_quote = 0.0 if mint.amount_quote is None else float(mint.amount_quote)
         decrease_base = 0.0 if decrease.amount_base is None else float(decrease.amount_base)
         decrease_quote = 0.0 if decrease.amount_quote is None else float(decrease.amount_quote)
         collect_base = 0.0 if collect.amount_base is None else float(collect.amount_base)
@@ -997,28 +1002,12 @@ class FrontendService:
         cex_units = int(snap.metrics.realized_pnl_quote_units) + int(snap.metrics.unrealized_pnl_quote_units)
         cex_quote = float(cex_units) * float(quote_per_cex_unit)
 
-        if item.close_trigger_side is None:
-            raise RuntimeError('FrontendService._derive_iteration_components: close_trigger_side is None')
+        start_value_target = float(mint_base) * float(base_price) + float(mint_quote)
+        if float(start_value_target) <= 0.0:
+            raise RuntimeError(f'FrontendService._derive_iteration_components: bad start_value_target: {start_value_target}')
 
-        exit_price = 0.0
-        if item.close_trigger_side == MockHedgeBoundary.UPPER:
-            exit_price = float(calc.price_upper)
-        elif item.close_trigger_side == MockHedgeBoundary.LOWER:
-            exit_price = float(calc.price_lower)
-        else:
-            raise RuntimeError(
-                'FrontendService._derive_iteration_components: unsupported close_trigger_side: '
-                f'{item.close_trigger_side}'
-            )
-
-        if float(exit_price) <= 0.0:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: bad exit_price: {exit_price}')
-
-        total_quote = float(calc.total_quote)
-        if float(total_quote) <= 0.0:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: bad total_quote: {total_quote}')
-
-        il_quote = float(decrease_base) * float(exit_price) + float(decrease_quote) - float(total_quote)
+        step_exit_value = float(decrease_base) * float(valuation_price) + float(decrease_quote)
+        il_quote = float(step_exit_value) - float(start_value_target)
 
         fees_quote = (float(collect_quote) - float(decrease_quote)) + (
             (float(collect_base) - float(decrease_base)) * float(valuation_price)

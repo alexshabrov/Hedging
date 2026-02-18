@@ -51,7 +51,7 @@
                             Все PnL в quote-валюте (например, USDC/USDT), все APR в процентах годовых (%).
                         </p>
                         <p class="mb-4">
-                            Для IL используется единый источник: raw поля итерации из БД (<code>stats.calc</code>, <code>stats.uniswap</code>, <code>close_trigger_side</code>), без кэшей и без сохранённых derived-значений.
+                            Для IL используется единый источник: raw поля итерации из БД (<code>stats.calc</code> и <code>stats.uniswap</code>), без кэшей и без сохранённых derived-значений.
                         </p>
 
                         <h5>1) Обозначения</h5>
@@ -136,11 +136,12 @@
                                     <td>DEX price PnL</td>
                                     <td>
                                         <code>
-                                            exit_price = (close_trigger_side == upper) ? price_upper : price_lower
-                                            dex_realized_il_quote = decrease_base * exit_price + decrease_quote - total_quote
+                                            start_value_target = mint_base * base_price + mint_quote
+                                            step_exit_value = decrease_base * valuation_price + decrease_quote
+                                            dex_realized_il_quote = step_exit_value - start_value_target
                                         </code>
                                     </td>
-                                    <td>Реализованный IL из raw полей итерации (по формуле rebalance-boundary).</td>
+                                    <td>Реализованный IL из raw полей итерации (как value at exit - start value target).</td>
                                 </tr>
                                 <tr>
                                     <td>Fees received quote</td>
