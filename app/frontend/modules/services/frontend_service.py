@@ -11,6 +11,7 @@ from typing import Dict, List
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
 from backend.models.hedger_models import HedgerConfig, CexTriggerMode, MockRealtimeSource
+from backend.models.mock_hedge_models import MockHedgeBoundary
 from frontend.modules.models.frontend_models import (
     FrontendCreateTemplateForm,
     FrontendActivePositionDoc,
@@ -996,7 +997,28 @@ class FrontendService:
         cex_units = int(snap.metrics.realized_pnl_quote_units) + int(snap.metrics.unrealized_pnl_quote_units)
         cex_quote = float(cex_units) * float(quote_per_cex_unit)
 
-        il_quote = float(item.pnl.dex_realized_il_quote)
+        if item.close_trigger_side is None:
+            raise RuntimeError('FrontendService._derive_iteration_components: close_trigger_side is None')
+
+        exit_price = 0.0
+        if item.close_trigger_side == MockHedgeBoundary.UPPER:
+            exit_price = float(calc.price_upper)
+        elif item.close_trigger_side == MockHedgeBoundary.LOWER:
+            exit_price = float(calc.price_lower)
+        else:
+            raise RuntimeError(
+                'FrontendService._derive_iteration_components: unsupported close_trigger_side: '
+                f'{item.close_trigger_side}'
+            )
+
+        if float(exit_price) <= 0.0:
+            raise RuntimeError(f'FrontendService._derive_iteration_components: bad exit_price: {exit_price}')
+
+        total_quote = float(calc.total_quote)
+        if float(total_quote) <= 0.0:
+            raise RuntimeError(f'FrontendService._derive_iteration_components: bad total_quote: {total_quote}')
+
+        il_quote = float(decrease_base) * float(exit_price) + float(decrease_quote) - float(total_quote)
 
         fees_quote = (float(collect_quote) - float(decrease_quote)) + (
             (float(collect_base) - float(decrease_base)) * float(valuation_price)
