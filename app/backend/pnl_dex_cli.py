@@ -3,9 +3,9 @@ Wallet on-chain history and realized PnL report
 Date: 2026-02-15
 Version: 1.1
 """
-import argparse, requests, time
+import argparse, hashlib, json, os, requests, time
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from web3 import Web3
 from pymongo import MongoClient  # type: ignore[import-not-found]
 
@@ -53,6 +53,21 @@ POOL_ABI = [
         'outputs': [{'name': '', 'type': 'address'}],
         'type': 'function',
     },
+    {
+        'constant': True,
+        'inputs': [],
+        'name': 'slot0',
+        'outputs': [
+            {'name': 'sqrtPriceX96', 'type': 'uint160'},
+            {'name': 'tick', 'type': 'int24'},
+            {'name': 'observationIndex', 'type': 'uint16'},
+            {'name': 'observationCardinality', 'type': 'uint16'},
+            {'name': 'observationCardinalityNext', 'type': 'uint16'},
+            {'name': 'feeProtocol', 'type': 'uint8'},
+            {'name': 'unlocked', 'type': 'bool'},
+        ],
+        'type': 'function',
+    },
 ]
 
 NETWORK_NPM: Dict[str, str] = {
@@ -87,6 +102,9 @@ NETWORK_UNISWAP_ROUTERS: Dict[str, List[str]] = {
 ACTIVE_POSITIONS_COLLECTION = 'backend_positions_active'
 ARCHIVE_POSITIONS_COLLECTION = 'backend_positions_archive'
 HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
+CACHE_DIR = '/tmp/pnl_dex_cli_cache_v2'
+CACHE_BINANCE_PRICE_TTL_SEC = 15
+UNISWAP_V3_Q96 = 2 ** 96
 
 TRANSFER_TOPIC = Web3.to_hex(Web3.keccak(text='Transfer(address,address,uint256)'))
 INCREASE_LIQ_TOPIC = Web3.to_hex(Web3.keccak(text='IncreaseLiquidity(uint256,uint128,uint256,uint256)'))
@@ -283,6 +301,7 @@ class LpPositionState(StrictModel):
     liquidity_open: int
     principal_weth_open: float
     principal_usdc_open: float
+    start_value_target_quote_open: float
 
 
 class HistoryTx(StrictModel):
@@ -379,6 +398,94 @@ def parse_args():
 
 
 ### Helpers ###
+def _to_jsonable(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, bytes):
+        return Web3.to_hex(value)
+    if isinstance(value, list):
+        out_list = []
+        for item in value:
+            out_list.append(_to_jsonable(item))
+        return out_list
+    if isinstance(value, tuple):
+        out_list = []
+        for item in value:
+            out_list.append(_to_jsonable(item))
+        return out_list
+    if isinstance(value, dict):
+        out_dict = {}
+        for k, v in value.items():
+            out_dict[str(k)] = _to_jsonable(v)
+        return out_dict
+    if hasattr(value, 'items'):
+        out_dict = {}
+        for k, v in value.items():
+            out_dict[str(k)] = _to_jsonable(v)
+        return out_dict
+    raise RuntimeError(f'unsupported value type for cache serialization: {type(value)}')
+
+
+def _cache_file_path(namespace: str, cache_key: Dict[str, Any]) -> str:
+    if not isinstance(namespace, str) or len(namespace) == 0:
+        raise RuntimeError('cache namespace is empty')
+    if cache_key is None:
+        raise RuntimeError('cache_key is None')
+    if not isinstance(cache_key, dict):
+        raise RuntimeError(f'cache_key is not dict: {type(cache_key)}')
+
+    key_json = json.dumps(_to_jsonable(cache_key), ensure_ascii=True, sort_keys=True, separators=(',', ':'))
+    digest = hashlib.sha256(key_json.encode('utf-8')).hexdigest()
+    return os.path.join(str(CACHE_DIR), str(namespace), f'{digest}.json')
+
+
+def _cache_get(namespace: str, cache_key: Dict[str, Any], ttl_seconds: Optional[int]) -> Optional[Any]:
+    path = _cache_file_path(str(namespace), cache_key)
+    if not os.path.exists(path):
+        return None
+
+    with open(path, 'r', encoding='utf-8') as f:
+        payload = json.load(f)
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f'cache payload is not dict: path={path} type={type(payload)}')
+    if 'created_at_sec' not in payload:
+        raise RuntimeError(f'cache payload has no created_at_sec: path={path}')
+    if 'value' not in payload:
+        raise RuntimeError(f'cache payload has no value: path={path}')
+
+    created_at_sec = float(payload['created_at_sec'])
+    if ttl_seconds is not None and int(ttl_seconds) >= 0:
+        if time.time() - float(created_at_sec) > float(ttl_seconds):
+            return None
+
+    return payload['value']
+
+
+def _cache_put(namespace: str, cache_key: Dict[str, Any], value: Any) -> None:
+    path = _cache_file_path(str(namespace), cache_key)
+    path_dir = os.path.dirname(path)
+    os.makedirs(path_dir, exist_ok=True)
+
+    payload = {
+        'created_at_sec': float(time.time()),
+        'value': _to_jsonable(value),
+    }
+
+    tmp_path = f'{path}.tmp.{os.getpid()}.{int(time.time() * 1_000_000)}'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=True, sort_keys=True)
+    os.replace(tmp_path, path)
+
+
 def _hex_to_int(v) -> int:
     if isinstance(v, int):
         return int(v)
@@ -610,6 +717,19 @@ def _map_pool_amounts_to_weth_usdc(amount0_raw: int, amount1_raw: int, token0_lc
 
 
 def _rpc_call(rpc_url: str, method: str, params: List, request_id: int):
+    cache_key = {
+        'rpc_url': str(rpc_url),
+        'method': str(method),
+        'params': _to_jsonable(params),
+    }
+    cached_result = _cache_get(
+        namespace='rpc',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached_result is not None:
+        return cached_result
+
     payload = {
         'jsonrpc': '2.0',
         'id': int(request_id),
@@ -629,7 +749,13 @@ def _rpc_call(rpc_url: str, method: str, params: List, request_id: int):
     if 'result' not in data:
         raise RuntimeError(f'rpc result has no result field: method={method}')
 
-    return data['result']
+    result = data['result']
+    _cache_put(
+        namespace='rpc',
+        cache_key=cache_key,
+        value=result,
+    )
+    return result
 
 
 def _alchemy_list_transfers(rpc_url: str, logger, wallet_address: str, token_address: str, from_block_hex: str, to_block_hex: str, page_size: int, direction: str) -> List[AlchemyTransfer]:
@@ -725,6 +851,18 @@ def _alchemy_list_tx_refs(rpc_url: str, logger, params_obj: Dict, log_tag: str) 
 
 
 def _get_eth_price_usdt(symbol: str) -> float:
+    cache_key = {'symbol': str(symbol)}
+    cached_price = _cache_get(
+        namespace='binance_price',
+        cache_key=cache_key,
+        ttl_seconds=int(CACHE_BINANCE_PRICE_TTL_SEC),
+    )
+    if cached_price is not None:
+        price_cached = float(cached_price)
+        if float(price_cached) <= 0:
+            raise RuntimeError(f'cached binance price is not positive: {price_cached}')
+        return float(price_cached)
+
     url = f'https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}'
     response = requests.get(url, timeout=10)
     if int(response.status_code) != 200:
@@ -740,11 +878,220 @@ def _get_eth_price_usdt(symbol: str) -> float:
     if float(price) <= 0:
         raise RuntimeError(f'binance price is not positive: {price}')
 
+    _cache_put(
+        namespace='binance_price',
+        cache_key=cache_key,
+        value=float(price),
+    )
     return float(price)
 
 
-def _load_token_meta(w3: Web3, token_address: str) -> TokenMeta:
+def _w3_rpc_hint(w3: Web3) -> str:
+    if hasattr(w3, 'provider') and hasattr(w3.provider, 'endpoint_uri'):
+        return str(w3.provider.endpoint_uri)
+    return ''
+
+
+def _w3_get_transaction_cached(w3: Web3, tx_hash: str) -> Dict[str, Any]:
+    cache_key = {
+        'rpc_hint': str(_w3_rpc_hint(w3)),
+        'tx_hash': str(tx_hash),
+    }
+    cached = _cache_get(
+        namespace='w3_get_transaction',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached is not None:
+        if not isinstance(cached, dict):
+            raise RuntimeError(f'cached tx is not dict: tx_hash={tx_hash} type={type(cached)}')
+        return cached
+
+    tx = w3.eth.get_transaction(str(tx_hash))
+    tx_json = _to_jsonable(tx)
+    if not isinstance(tx_json, dict):
+        raise RuntimeError(f'tx json is not dict: tx_hash={tx_hash} type={type(tx_json)}')
+    _cache_put(
+        namespace='w3_get_transaction',
+        cache_key=cache_key,
+        value=tx_json,
+    )
+    return tx_json
+
+
+def _w3_get_transaction_receipt_cached(w3: Web3, tx_hash: str) -> Dict[str, Any]:
+    cache_key = {
+        'rpc_hint': str(_w3_rpc_hint(w3)),
+        'tx_hash': str(tx_hash),
+    }
+    cached = _cache_get(
+        namespace='w3_get_transaction_receipt',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached is not None:
+        if not isinstance(cached, dict):
+            raise RuntimeError(f'cached receipt is not dict: tx_hash={tx_hash} type={type(cached)}')
+        return cached
+
+    receipt = w3.eth.get_transaction_receipt(str(tx_hash))
+    receipt_json = _to_jsonable(receipt)
+    if not isinstance(receipt_json, dict):
+        raise RuntimeError(f'receipt json is not dict: tx_hash={tx_hash} type={type(receipt_json)}')
+    _cache_put(
+        namespace='w3_get_transaction_receipt',
+        cache_key=cache_key,
+        value=receipt_json,
+    )
+    return receipt_json
+
+
+def _w3_get_block_cached(w3: Web3, block_number: int) -> Dict[str, Any]:
+    cache_key = {
+        'rpc_hint': str(_w3_rpc_hint(w3)),
+        'block_number': int(block_number),
+    }
+    cached = _cache_get(
+        namespace='w3_get_block',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached is not None:
+        if not isinstance(cached, dict):
+            raise RuntimeError(f'cached block is not dict: block={block_number} type={type(cached)}')
+        return cached
+
+    block = w3.eth.get_block(int(block_number))
+    block_json = _to_jsonable(block)
+    if not isinstance(block_json, dict):
+        raise RuntimeError(f'block json is not dict: block={block_number} type={type(block_json)}')
+    _cache_put(
+        namespace='w3_get_block',
+        cache_key=cache_key,
+        value=block_json,
+    )
+    return block_json
+
+
+def _erc20_balance_of_cached(w3: Web3, token_address: str, wallet_address: str, block_number: int) -> int:
+    cache_key = {
+        'rpc_hint': str(_w3_rpc_hint(w3)),
+        'token_address': str(Web3.to_checksum_address(token_address)),
+        'wallet_address': str(Web3.to_checksum_address(wallet_address)),
+        'block_number': int(block_number),
+    }
+    cached = _cache_get(
+        namespace='erc20_balance_of',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached is not None:
+        return int(cached)
+
     token = w3.eth.contract(address=Web3.to_checksum_address(token_address), abi=ERC20_ABI)
+    balance_raw = int(token.functions.balanceOf(Web3.to_checksum_address(wallet_address)).call(block_identifier=int(block_number)))
+    _cache_put(
+        namespace='erc20_balance_of',
+        cache_key=cache_key,
+        value=int(balance_raw),
+    )
+    return int(balance_raw)
+
+
+def _pool_price_weth_usdc_at_block_cached(
+    pool_contract,
+    pool_address: str,
+    block_number: int,
+    token0: TokenMeta,
+    token1: TokenMeta,
+    weth_token: TokenMeta,
+) -> float:
+    cache_key = {
+        'pool_address': str(Web3.to_checksum_address(pool_address)),
+        'block_number': int(block_number),
+        'token0_address': str(Web3.to_checksum_address(token0.address)),
+        'token1_address': str(Web3.to_checksum_address(token1.address)),
+        'token0_decimals': int(token0.decimals),
+        'token1_decimals': int(token1.decimals),
+        'weth_address': str(Web3.to_checksum_address(weth_token.address)),
+    }
+    cached = _cache_get(
+        namespace='pool_price_weth_usdc',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached is not None:
+        price_cached = float(cached)
+        if float(price_cached) <= 0:
+            raise RuntimeError(f'cached pool price <= 0 at block={block_number}: {price_cached}')
+        return float(price_cached)
+
+    slot0 = pool_contract.functions.slot0().call(block_identifier=int(block_number))
+    if not isinstance(slot0, (list, tuple)):
+        raise RuntimeError(f'slot0 return type is invalid: block={block_number} type={type(slot0)}')
+    if len(slot0) <= 0:
+        raise RuntimeError(f'slot0 return is empty: block={block_number}')
+
+    sqrt_price_x96 = int(slot0[0])
+    if int(sqrt_price_x96) <= 0:
+        raise RuntimeError(f'slot0 sqrtPriceX96 <= 0 at block={block_number}: {sqrt_price_x96}')
+
+    token1_per_token0 = (float(sqrt_price_x96) / float(UNISWAP_V3_Q96)) ** 2
+    token1_per_token0 = float(token1_per_token0) * float(10 ** (int(token0.decimals) - int(token1.decimals)))
+
+    token0_lc = str(token0.address).lower()
+    token1_lc = str(token1.address).lower()
+    weth_lc = str(weth_token.address).lower()
+
+    if str(token0_lc) == str(weth_lc):
+        weth_price_usdc = float(token1_per_token0)
+    elif str(token1_lc) == str(weth_lc):
+        if float(token1_per_token0) <= 0.0:
+            raise RuntimeError(f'token1_per_token0 <= 0 at block={block_number}: {token1_per_token0}')
+        weth_price_usdc = 1.0 / float(token1_per_token0)
+    else:
+        raise RuntimeError(
+            f'pool does not contain weth token: pool={pool_address} '
+            f'token0={token0.address} token1={token1.address} weth={weth_token.address}'
+        )
+
+    if float(weth_price_usdc) <= 0.0:
+        raise RuntimeError(f'weth_price_usdc <= 0 at block={block_number}: {weth_price_usdc}')
+
+    _cache_put(
+        namespace='pool_price_weth_usdc',
+        cache_key=cache_key,
+        value=float(weth_price_usdc),
+    )
+    return float(weth_price_usdc)
+
+
+def _load_token_meta(w3: Web3, token_address: str) -> TokenMeta:
+    rpc_hint = ''
+    if hasattr(w3, 'provider') and hasattr(w3.provider, 'endpoint_uri'):
+        rpc_hint = str(w3.provider.endpoint_uri)
+    checksum = Web3.to_checksum_address(token_address)
+    cache_key = {
+        'rpc_hint': str(rpc_hint),
+        'token_address': str(checksum),
+    }
+    cached = _cache_get(
+        namespace='token_meta',
+        cache_key=cache_key,
+        ttl_seconds=None,
+    )
+    if cached is not None:
+        if not isinstance(cached, dict):
+            raise RuntimeError(f'cached token meta is not dict: {type(cached)}')
+        if 'symbol' not in cached or 'decimals' not in cached:
+            raise RuntimeError(f'cached token meta is malformed for {token_address}: {cached}')
+        return TokenMeta(
+            symbol=str(cached['symbol']),
+            address=str(checksum),
+            decimals=int(cached['decimals']),
+        )
+
+    token = w3.eth.contract(address=checksum, abi=ERC20_ABI)
     symbol = token.functions.symbol().call()
     decimals = token.functions.decimals().call()
 
@@ -755,11 +1102,20 @@ def _load_token_meta(w3: Web3, token_address: str) -> TokenMeta:
     if int(decimals) < 0:
         raise RuntimeError(f'token decimals is negative for {token_address}: {decimals}')
 
-    return TokenMeta(
+    meta = TokenMeta(
         symbol=str(symbol),
-        address=Web3.to_checksum_address(token_address),
+        address=str(checksum),
         decimals=int(decimals),
     )
+    _cache_put(
+        namespace='token_meta',
+        cache_key=cache_key,
+        value={
+            'symbol': str(meta.symbol),
+            'decimals': int(meta.decimals),
+        },
+    )
+    return meta
 
 
 def _load_pool_tokens(w3: Web3, pool_address: str) -> Tuple[TokenMeta, TokenMeta]:
@@ -854,8 +1210,8 @@ def _collect_candidate_hashes_alchemy(rpc_url: str, logger, wallet_address: str,
 
 
 def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wallet_lc: str, npm_lc: str, router_lc_set: Set[str], pool_lc: str, token0_lc: str, weth_token: TokenMeta, usdc_token: TokenMeta) -> Optional[HistoryTx]:
-    tx = w3.eth.get_transaction(str(tx_hash))
-    receipt = w3.eth.get_transaction_receipt(str(tx_hash))
+    tx = _w3_get_transaction_cached(w3=w3, tx_hash=str(tx_hash))
+    receipt = _w3_get_transaction_receipt_cached(w3=w3, tx_hash=str(tx_hash))
 
     if 'blockNumber' not in receipt:
         raise RuntimeError(f'receipt has no blockNumber: {tx_hash}')
@@ -865,7 +1221,7 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
     tx_index = int(receipt['transactionIndex'])
 
     if int(block_number) not in block_ts_cache:
-        block = w3.eth.get_block(int(block_number))
+        block = _w3_get_block_cached(w3=w3, block_number=int(block_number))
         if 'timestamp' not in block:
             raise RuntimeError(f'block has no timestamp: tx={tx_hash} block={block_number}')
         block_ts_cache[int(block_number)] = int(block['timestamp']) * 1000
@@ -1088,11 +1444,12 @@ def _build_report(
     logger,
     weth_token: TokenMeta,
     usdc_token: TokenMeta,
+    token0: TokenMeta,
+    token1: TokenMeta,
     tx_hashes: List[str],
     npm_address: str,
     router_set: Set[str],
     pool_address: str,
-    token0_address: str,
     eth_price: float,
     cutoff_started_at_ms: int,
     swap_cost_quote_sum: float,
@@ -1103,7 +1460,7 @@ def _build_report(
     wallet_lc = str(args.wallet_address).lower()
     npm_lc = str(npm_address).lower()
     pool_lc = str(pool_address).lower()
-    token0_lc = str(token0_address).lower()
+    token0_lc = str(token0.address).lower()
     block_ts_cache: Dict[int, int] = {}
     txs: List[HistoryTx] = []
     total_hashes = len(tx_hashes)
@@ -1153,14 +1510,34 @@ def _build_report(
     if int(start_block) < 0:
         start_block = 0
 
-    weth_contract = w3.eth.contract(address=Web3.to_checksum_address(str(weth_token.address)), abi=ERC20_ABI)
-    usdc_contract = w3.eth.contract(address=Web3.to_checksum_address(str(usdc_token.address)), abi=ERC20_ABI)
+    pool_contract = w3.eth.contract(address=Web3.to_checksum_address(str(pool_address)), abi=POOL_ABI)
+    pool_price_by_block: Dict[int, float] = {}
     wallet_checksum = Web3.to_checksum_address(str(args.wallet_address))
 
-    start_weth_raw = int(weth_contract.functions.balanceOf(wallet_checksum).call(block_identifier=int(start_block)))
-    start_usdc_raw = int(usdc_contract.functions.balanceOf(wallet_checksum).call(block_identifier=int(start_block)))
-    end_weth_raw = int(weth_contract.functions.balanceOf(wallet_checksum).call(block_identifier=int(args.to_block)))
-    end_usdc_raw = int(usdc_contract.functions.balanceOf(wallet_checksum).call(block_identifier=int(args.to_block)))
+    start_weth_raw = _erc20_balance_of_cached(
+        w3=w3,
+        token_address=str(weth_token.address),
+        wallet_address=str(wallet_checksum),
+        block_number=int(start_block),
+    )
+    start_usdc_raw = _erc20_balance_of_cached(
+        w3=w3,
+        token_address=str(usdc_token.address),
+        wallet_address=str(wallet_checksum),
+        block_number=int(start_block),
+    )
+    end_weth_raw = _erc20_balance_of_cached(
+        w3=w3,
+        token_address=str(weth_token.address),
+        wallet_address=str(wallet_checksum),
+        block_number=int(args.to_block),
+    )
+    end_usdc_raw = _erc20_balance_of_cached(
+        w3=w3,
+        token_address=str(usdc_token.address),
+        wallet_address=str(wallet_checksum),
+        block_number=int(args.to_block),
+    )
 
     start_weth = _to_float_token(start_weth_raw, weth_token.decimals)
     start_usdc = _to_float_token(start_usdc_raw, usdc_token.decimals)
@@ -1177,6 +1554,7 @@ def _build_report(
     sum_fee_usdc = 0.0
     realized_il_weth = 0.0
     realized_il_usdc = 0.0
+    realized_il_quote_total = 0.0
     sum_closed_principal_weth = 0.0
     sum_closed_principal_usdc = 0.0
     sum_decrease_weth = 0.0
@@ -1204,14 +1582,41 @@ def _build_report(
                 liquidity_open=0,
                 principal_weth_open=0.0,
                 principal_usdc_open=0.0,
+                start_value_target_quote_open=0.0,
             )
             if token_id in lp_positions_by_token:
                 prev = lp_positions_by_token[token_id]
+
+            tx_block = int(tx.block_number)
+            if int(tx_block) not in pool_price_by_block:
+                pool_price_by_block[int(tx_block)] = _pool_price_weth_usdc_at_block_cached(
+                    pool_contract=pool_contract,
+                    pool_address=str(pool_address),
+                    block_number=int(tx_block),
+                    token0=token0,
+                    token1=token1,
+                    weth_token=weth_token,
+                )
+            base_price_at_increase = float(pool_price_by_block[int(tx_block)])
+            if float(base_price_at_increase) <= 0.0:
+                raise RuntimeError(
+                    f'base_price_at_increase <= 0 for token_id={token_id} tx={tx.tx_hash} '
+                    f'block={tx_block} value={base_price_at_increase}'
+                )
+            inc_start_value_target_quote = (
+                float(inc_move.weth) * float(base_price_at_increase) + float(inc_move.usdc)
+            )
+            if float(inc_start_value_target_quote) < 0.0:
+                raise RuntimeError(
+                    f'inc_start_value_target_quote < 0 for token_id={token_id} tx={tx.tx_hash}: '
+                    f'{inc_start_value_target_quote}'
+                )
 
             lp_positions_by_token[token_id] = LpPositionState(
                 liquidity_open=int(prev.liquidity_open) + int(inc_move.liquidity),
                 principal_weth_open=float(prev.principal_weth_open) + float(inc_move.weth),
                 principal_usdc_open=float(prev.principal_usdc_open) + float(inc_move.usdc),
+                start_value_target_quote_open=float(prev.start_value_target_quote_open) + float(inc_start_value_target_quote),
             )
 
         for dec_move in tx.decrease_moves:
@@ -1240,24 +1645,36 @@ def _build_report(
             if float(close_fraction) > 1.0:
                 close_fraction = 1.0
 
-            # Explicit partial-close allocation using accumulated base principal and average quote cost:
-            # avg_quote_per_base = principal_usdc_open / principal_weth_open
-            # closed_principal_base = principal_weth_open * close_fraction
-            # closed_principal_quote = closed_principal_base * avg_quote_per_base
             closed_principal_weth = float(prev.principal_weth_open) * float(close_fraction)
-            if abs(float(prev.principal_weth_open)) > 1e-18:
-                avg_quote_per_base = _avg_quote_cost_per_base(
-                    base_accum=float(prev.principal_weth_open),
-                    quote_accum=float(prev.principal_usdc_open),
-                )
-                closed_principal_usdc = float(closed_principal_weth) * float(avg_quote_per_base)
-            else:
-                closed_principal_usdc = float(prev.principal_usdc_open) * float(close_fraction)
+            closed_principal_usdc = float(prev.principal_usdc_open) * float(close_fraction)
+            closed_start_value_target_quote = float(prev.start_value_target_quote_open) * float(close_fraction)
 
             if float(closed_principal_weth) > float(prev.principal_weth_open):
                 closed_principal_weth = float(prev.principal_weth_open)
             if float(closed_principal_usdc) > float(prev.principal_usdc_open):
                 closed_principal_usdc = float(prev.principal_usdc_open)
+            if float(closed_start_value_target_quote) > float(prev.start_value_target_quote_open):
+                closed_start_value_target_quote = float(prev.start_value_target_quote_open)
+
+            tx_block = int(tx.block_number)
+            if int(tx_block) not in pool_price_by_block:
+                pool_price_by_block[int(tx_block)] = _pool_price_weth_usdc_at_block_cached(
+                    pool_contract=pool_contract,
+                    pool_address=str(pool_address),
+                    block_number=int(tx_block),
+                    token0=token0,
+                    token1=token1,
+                    weth_token=weth_token,
+                )
+            valuation_price_at_decrease = float(pool_price_by_block[int(tx_block)])
+            if float(valuation_price_at_decrease) <= 0.0:
+                raise RuntimeError(
+                    f'valuation_price_at_decrease <= 0 for token_id={token_id} tx={tx.tx_hash} '
+                    f'block={tx_block} value={valuation_price_at_decrease}'
+                )
+            step_exit_value = float(dec_move.weth) * float(valuation_price_at_decrease) + float(dec_move.usdc)
+            step_realized_il_quote = float(step_exit_value) - float(closed_start_value_target_quote)
+            realized_il_quote_total += float(step_realized_il_quote)
 
             realized_il_weth += float(dec_move.weth) - float(closed_principal_weth)
             realized_il_usdc += float(dec_move.usdc) - float(closed_principal_usdc)
@@ -1269,25 +1686,36 @@ def _build_report(
             next_liquidity_open = int(prev.liquidity_open) - int(dec_move.liquidity)
             next_principal_weth_open = float(prev.principal_weth_open) - float(closed_principal_weth)
             next_principal_usdc_open = float(prev.principal_usdc_open) - float(closed_principal_usdc)
+            next_start_value_target_quote_open = (
+                float(prev.start_value_target_quote_open) - float(closed_start_value_target_quote)
+            )
 
             if float(next_principal_weth_open) < -1e-12:
                 raise RuntimeError(f'next_principal_weth_open < 0 for token_id={token_id}: {next_principal_weth_open}')
             if float(next_principal_usdc_open) < -1e-9:
                 raise RuntimeError(f'next_principal_usdc_open < 0 for token_id={token_id}: {next_principal_usdc_open}')
+            if float(next_start_value_target_quote_open) < -1e-9:
+                raise RuntimeError(
+                    f'next_start_value_target_quote_open < 0 for token_id={token_id}: {next_start_value_target_quote_open}'
+                )
 
             if float(next_principal_weth_open) < 0.0:
                 next_principal_weth_open = 0.0
             if float(next_principal_usdc_open) < 0.0:
                 next_principal_usdc_open = 0.0
+            if float(next_start_value_target_quote_open) < 0.0:
+                next_start_value_target_quote_open = 0.0
 
             if int(next_liquidity_open) == 0:
                 next_principal_weth_open = 0.0
                 next_principal_usdc_open = 0.0
+                next_start_value_target_quote_open = 0.0
 
             lp_positions_by_token[token_id] = LpPositionState(
                 liquidity_open=int(next_liquidity_open),
                 principal_weth_open=float(next_principal_weth_open),
                 principal_usdc_open=float(next_principal_usdc_open),
+                start_value_target_quote_open=float(next_start_value_target_quote_open),
             )
 
             pending_prev = PendingPrincipal(weth=0.0, usdc=0.0)
@@ -1376,7 +1804,7 @@ def _build_report(
     sum_base_delta = float(sum_decrease_weth) - float(sum_closed_principal_weth)
     sum_quote_delta = float(sum_decrease_usdc) - float(sum_closed_principal_usdc)
     fees_quote = _to_quote_pnl(float(fees_weth), float(fees_usdc), float(current_price))
-    il_quote = float(sum_base_delta) * float(current_price) + float(sum_quote_delta)
+    il_quote = float(realized_il_quote_total)
 
     # Keep swap delta for diagnostics only.
     swaps_quote = _to_quote_pnl(float(sum_swap_weth), float(sum_swap_usdc), float(current_price))
@@ -1618,11 +2046,12 @@ def main() -> None:
         logger=logger,
         weth_token=weth_token,
         usdc_token=usdc_token,
+        token0=token0,
+        token1=token1,
         tx_hashes=tx_hashes,
         npm_address=str(npm_address),
         router_set=router_lc_set,
         pool_address=str(pool_checksum),
-        token0_address=str(token0.address),
         eth_price=float(eth_price),
         cutoff_started_at_ms=int(first_position_started_at_ms),
         swap_cost_quote_sum=float(swap_cost_quote_sum),
@@ -1662,27 +2091,26 @@ def main() -> None:
     print(f'WETH start/end: {report.balances.start_weth:.8f} -> {report.balances.end_weth:.8f} (delta {report.balances.delta_weth:.8f})')
     print(f'USDC start/end: {report.balances.start_usdc:.8f} -> {report.balances.end_usdc:.8f} (delta {report.balances.delta_usdc:.8f})')
     print('')
-    realized_il_pnl_usdc = _to_quote_pnl(
-        base_delta=float(report.pnl.realized_il.weth),
-        quote_delta=float(report.pnl.realized_il.usdc),
-        base_price=float(report.eth_price_usdt),
-    )
+    realized_il_pnl_usdc = float(report.pnl.il_quote)
     fees_pnl_usdc = _to_quote_pnl(
         base_delta=float(report.pnl.fees.weth),
         quote_delta=float(report.pnl.fees.usdc),
         base_price=float(report.eth_price_usdt),
     )
     print(f'Fees from pool: WETH={report.pnl.fees.weth:.8f}, USDC={report.pnl.fees.usdc:.8f}, PnL(USDC)={fees_pnl_usdc:.8f}')
-    print(f'Realized IL:    WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f}, PnL(USDC)={realized_il_pnl_usdc:.8f}')
+    print(
+        f'Realized IL:    quote={realized_il_pnl_usdc:.8f} '
+        f'(diag token delta: WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f})'
+    )
     print(f'Uniswap swaps (diag only): WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
     print(f'Gas (add/remove/collect/rebalance): ETH={report.pnl.gas_eth:.8f}, USDC={report.pnl.gas_usdc:.8f}')
     print(f'Swap costs (from backend_hedger_runs): USDC={float(swap_cost_quote_sum):.8f}')
     print('')
     print('Frontend-compatible chain:')
-    print(f'  current_price:              {report.pnl.current_price:.8f} (единая текущая цена оценки для всего расчета, P_current)')
-    print(f'  sum_base_delta:             {report.pnl.sum_base_delta:.8f} (сумма по итерациям: base1 - base0)')
-    print(f'  sum_quote_delta:            {report.pnl.sum_quote_delta:.8f} (сумма по итерациям: quote1 - quote0)')
-    print(f'  il_quote:                   {report.pnl.il_quote:.8f} (IL_run = sum_base_delta * current_price + sum_quote_delta)')
+    print(f'  current_price:              {report.pnl.current_price:.8f} (текущая цена для оценки fees/swap/gas)')
+    print(f'  sum_base_delta:             {report.pnl.sum_base_delta:.8f} (diag: Σ(decrease_base - allocated_mint_base))')
+    print(f'  sum_quote_delta:            {report.pnl.sum_quote_delta:.8f} (diag: Σ(decrease_quote - allocated_mint_quote))')
+    print(f'  il_quote:                   {report.pnl.il_quote:.8f} (Σ(step_exit_value - start_value_target) по decrease-событиям)')
     print(f'  pnl_fees_quote:             {report.pnl.pnl_fees_quote:.8f} (PnL_fees = Σ fees, только чистые комиссии)')
     print(f'  pnl_fees_il_quote:          {report.pnl.pnl_fees_il_quote:.8f} (PnL_fees_il = pnl_fees_quote + il_quote)')
     print(f'  costs_pnl_quote (signed):   {report.pnl.costs_pnl_quote:.8f} (Σ costs как signed PnL-компонент издержек)')
