@@ -2106,6 +2106,15 @@ def main() -> None:
     print('=== SUMMARY ===')
     print(f'WETH start/end: {report.balances.start_weth:.8f} -> {report.balances.end_weth:.8f} (delta {report.balances.delta_weth:.8f})')
     print(f'USDC start/end: {report.balances.start_usdc:.8f} -> {report.balances.end_usdc:.8f} (delta {report.balances.delta_usdc:.8f})')
+    balance_price = float(report.pnl.current_price)
+    start_balances_quote = float(report.balances.start_weth) * float(balance_price) + float(report.balances.start_usdc)
+    end_balances_quote = float(report.balances.end_weth) * float(balance_price) + float(report.balances.end_usdc)
+    delta_balances_quote = float(end_balances_quote) - float(start_balances_quote)
+    print(
+        f'Balances value @ current price: start={start_balances_quote:.8f} '
+        f'end={end_balances_quote:.8f} (delta {delta_balances_quote:.8f}) '
+        f'[base*price+quote, price={balance_price:.8f}]'
+    )
     print('')
     realized_il_pnl_usdc = float(report.pnl.il_quote)
     fees_pnl_usdc = _to_quote_pnl(
@@ -2113,12 +2122,20 @@ def main() -> None:
         quote_delta=float(report.pnl.fees.usdc),
         base_price=float(report.eth_price_usdt),
     )
+    swaps_diag_quote = _to_quote_pnl(
+        base_delta=float(report.pnl.swaps.weth),
+        quote_delta=float(report.pnl.swaps.usdc),
+        base_price=float(balance_price),
+    )
     print(f'Fees from pool: WETH={report.pnl.fees.weth:.8f}, USDC={report.pnl.fees.usdc:.8f}, PnL(USDC)={fees_pnl_usdc:.8f}')
     print(
         f'Realized IL:    quote={realized_il_pnl_usdc:.8f} '
         f'(diag token delta: WETH={report.pnl.realized_il.weth:.8f}, USDC={report.pnl.realized_il.usdc:.8f})'
     )
-    print(f'Uniswap swaps (diag only): WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}')
+    print(
+        f'Uniswap swaps (diag only): WETH={report.pnl.swaps.weth:.8f}, USDC={report.pnl.swaps.usdc:.8f}, '
+        f'quote={swaps_diag_quote:.8f} [base*price+quote, price={balance_price:.8f}]'
+    )
     print(f'Gas (add/remove/collect/rebalance): ETH={report.pnl.gas_eth:.8f}, USDC={report.pnl.gas_usdc:.8f}')
     print(f'Swap costs (from backend_hedger_runs): USDC={float(swap_cost_quote_sum):.8f}')
     print('')
