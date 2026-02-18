@@ -10,7 +10,7 @@ from typing import Dict, List
 
 from live.lib.logger import get_logger
 from backend.models.backend_models import BackendPositionView, BackendRunLifecycle, BackendStartRunRequest
-from backend.models.hedger_models import HedgerConfig, CexTriggerMode
+from backend.models.hedger_models import HedgerConfig, CexTriggerMode, MockRealtimeSource
 from frontend.modules.models.frontend_models import (
     FrontendCreateTemplateForm,
     FrontendActivePositionDoc,
@@ -158,9 +158,15 @@ class FrontendService:
             raise RuntimeError('FrontendService.start_run_from_template: price_lower_pct must be > 0')
         if float(form.price_upper_pct) <= 0.0:
             raise RuntimeError('FrontendService.start_run_from_template: price_upper_pct must be > 0')
+        if bool(form.mock_source_dex) and (not bool(form.dex_only)):
+            raise RuntimeError('FrontendService.start_run_from_template: mock_source_dex requires dex_only=true')
 
         template = self._storage.find_run_template(str(form.template_id))
         rpc_url = self._build_rpc_url_for_network(str(template.network))
+        ws_url = self._build_ws_url_for_network(str(template.network))
+        mock_realtime_source = MockRealtimeSource.LIVE
+        if bool(form.mock_source_dex):
+            mock_realtime_source = MockRealtimeSource.DEX
 
         req = BackendStartRunRequest(
             template_id=str(form.template_id),
@@ -188,6 +194,9 @@ class FrontendService:
                 cowswap_api_timeout_sec=int(self._runtime.cowswap_api_timeout_sec),
                 cowswap_wait_timeout_sec=int(self._runtime.cowswap_wait_timeout_sec),
                 cowswap_poll_interval_sec=int(self._runtime.cowswap_poll_interval_sec),
+                dex_only=bool(form.dex_only),
+                mock_realtime_source=mock_realtime_source,
+                dex_ws_url=str(ws_url),
             )
         )
 
@@ -240,6 +249,8 @@ class FrontendService:
                     iterations_count=item.iterations_count,
                     is_active=bool(is_active),
                     network=str(item.config.network),
+                    dex_only=bool(item.config.dex_only),
+                    mock_realtime_source=str(item.config.mock_realtime_source.value),
                 ))
 
         for item in archive_docs:
@@ -278,6 +289,8 @@ class FrontendService:
                 iterations_count=len(iteration_rows),
                 is_active=bool(is_active),
                 network=str(active_doc.config.network),
+                dex_only=bool(active_doc.config.dex_only),
+                mock_realtime_source=str(active_doc.config.mock_realtime_source.value),
             )
             config = active_doc.config
             template_id = active_doc.template_id
@@ -373,6 +386,8 @@ class FrontendService:
 
         active_runs = 0
         finished_iterations = 0
+        close_trigger_upper_count = 0
+        close_trigger_lower_count = 0
         total_invested_quote = 0.0
         total_pnl_with_hedge_quote = 0.0
         total_pnl_without_hedge_quote = 0.0
@@ -386,6 +401,8 @@ class FrontendService:
                 active_runs += 1
 
             finished_iterations += int(row.iterations_finished)
+            close_trigger_upper_count += int(row.close_trigger_upper_count)
+            close_trigger_lower_count += int(row.close_trigger_lower_count)
             # Dashboard assumes runs are sequential and reuse the same working capital.
             # Use the working-capital base (max run quote), not sum across runs.
             total_invested_quote = max(float(total_invested_quote), float(row.total_quote))
@@ -419,6 +436,13 @@ class FrontendService:
         # Keep dashboard "Average APR per run" aligned with dashboard methodology.
         avg_apr_with_hedge_pct = float(apr_with_hedge_pct)
 
+        close_trigger_total_count = int(close_trigger_upper_count) + int(close_trigger_lower_count)
+        close_trigger_upper_pct = 0.0
+        close_trigger_lower_pct = 0.0
+        if int(close_trigger_total_count) > 0:
+            close_trigger_upper_pct = float(close_trigger_upper_count) / float(close_trigger_total_count) * 100.0
+            close_trigger_lower_pct = float(close_trigger_lower_count) / float(close_trigger_total_count) * 100.0
+
         avg_iteration_lifetime_sec = 0.0
         if int(hold_seconds_n) > 0:
             avg_iteration_lifetime_sec = float(hold_seconds_sum) / float(hold_seconds_n)
@@ -426,6 +450,11 @@ class FrontendService:
         return FrontendDashboardView(
             active_runs=int(active_runs),
             finished_iterations=int(finished_iterations),
+            close_trigger_upper_count=int(close_trigger_upper_count),
+            close_trigger_lower_count=int(close_trigger_lower_count),
+            close_trigger_total_count=int(close_trigger_total_count),
+            close_trigger_upper_pct=float(close_trigger_upper_pct),
+            close_trigger_lower_pct=float(close_trigger_lower_pct),
             total_pnl_with_hedge_quote=float(total_pnl_with_hedge_quote),
             total_pnl_without_hedge_quote=float(total_pnl_without_hedge_quote),
             total_costs_quote=float(total_costs_quote),
@@ -454,6 +483,8 @@ class FrontendService:
             iterations_count=doc.iterations_count,
             is_active=True,
             network=str(doc.config.network),
+            dex_only=bool(doc.config.dex_only),
+            mock_realtime_source=str(doc.config.mock_realtime_source.value),
         )
 
     def _build_position_row_from_archive(self, doc: FrontendArchivePositionDoc) -> FrontendPositionRow:
@@ -462,6 +493,8 @@ class FrontendService:
             iterations_count=doc.iterations_count,
             is_active=False,
             network=str(doc.config.network),
+            dex_only=bool(doc.config.dex_only),
+            mock_realtime_source=str(doc.config.mock_realtime_source.value),
         )
 
     def _build_position_row_common(
@@ -470,6 +503,8 @@ class FrontendService:
         iterations_count: int,
         is_active: bool,
         network: str,
+        dex_only: bool,
+        mock_realtime_source: str,
     ) -> FrontendPositionRow:
         total_quote = float(position.total_quote)
         pnl_with_hedge_quote = float(position.pnl_with_hedge_quote)
@@ -494,6 +529,10 @@ class FrontendService:
             raise RuntimeError(f'FrontendService._build_position_row_common: total_quote <= 0: {total_quote}')
         if not isinstance(network, str) or len(network) == 0:
             raise RuntimeError('FrontendService._build_position_row_common: network is empty')
+        if not isinstance(dex_only, bool):
+            raise RuntimeError(f'FrontendService._build_position_row_common: dex_only is not bool: {type(dex_only)}')
+        if not isinstance(mock_realtime_source, str) or len(mock_realtime_source) == 0:
+            raise RuntimeError('FrontendService._build_position_row_common: mock_realtime_source is empty')
 
         pnl_with_hedge_pct = (float(pnl_with_hedge_quote) / float(total_quote)) * 100.0
         pnl_without_hedge_pct = (float(pnl_without_hedge_quote) / float(total_quote)) * 100.0
@@ -509,12 +548,19 @@ class FrontendService:
             run_id=str(position.run_id),
             network=str(network),
             symbol=str(position.symbol),
+            dex_only=bool(dex_only),
+            mock_realtime_source=str(mock_realtime_source),
             status=BackendRunLifecycle(str(position.status.value)),
             first_started_at_ms=int(position.first_started_at_ms),
             runtime_sec=float(position.runtime_sec),
             runtime_dhm=str(position.runtime_dhm),
             avg_iteration_lifetime_sec=float(position.avg_iteration_lifetime_sec),
             iterations_finished=int(position.iterations_finished),
+            close_trigger_upper_count=int(position.close_trigger_upper_count),
+            close_trigger_lower_count=int(position.close_trigger_lower_count),
+            close_trigger_total_count=int(position.close_trigger_total_count),
+            close_trigger_upper_pct=float(position.close_trigger_upper_pct),
+            close_trigger_lower_pct=float(position.close_trigger_lower_pct),
             market_price=None if position.market_price is None else float(position.market_price),
             price_lower=None if position.price_lower is None else float(position.price_lower),
             price_upper=None if position.price_upper is None else float(position.price_upper),
@@ -592,6 +638,7 @@ class FrontendService:
             runtime_sec=float(runtime_sec),
             status=str(row.status),
             close_reason=close_reason,
+            close_trigger_side=row.close_trigger_side,
             total_quote=float(total_quote),
             price_lower=float(calc.price_lower),
             price_upper=float(calc.price_upper),
@@ -688,6 +735,7 @@ class FrontendService:
             opened_ms=int(opened_ms),
             closed_ms=int(closed_ms),
             close_reason=close_reason,
+            close_trigger_side=row.close_trigger_side,
         )
 
     def _build_rebalance_block(self, row: FrontendIterationDoc) -> FrontendIterationRebalanceBlock:
@@ -984,7 +1032,50 @@ class FrontendService:
         if live.last_snapshot is None:
             return out
 
-        for chase in live.last_snapshot.metrics.chases:
+        chases = live.last_snapshot.metrics.chases
+        if len(chases) == 0:
+            return out
+
+        hedge_quote = float(row.stats.calc.hedge_quote)
+        if float(hedge_quote) <= 0.0:
+            raise RuntimeError(f'FrontendService._build_hedge_chases: hedge_quote <= 0: {hedge_quote}')
+
+        open_filled_quote_units = 0
+        for chase in chases:
+            if str(chase.kind) == 'open' and int(chase.filled_quote_units) > 0:
+                open_filled_quote_units = int(chase.filled_quote_units)
+                break
+
+        if int(open_filled_quote_units) <= 0:
+            raise RuntimeError('FrontendService._build_hedge_chases: open_filled_quote_units not found')
+
+        quote_per_cex_unit = float(hedge_quote) / float(open_filled_quote_units)
+        if float(quote_per_cex_unit) <= 0.0:
+            raise RuntimeError(f'FrontendService._build_hedge_chases: quote_per_cex_unit <= 0: {quote_per_cex_unit}')
+
+        chases_count = int(len(chases))
+        cex_quote_balance_units = 0
+        final_cex_pnl_quote_units = (
+            int(live.last_snapshot.metrics.realized_pnl_quote_units)
+            + int(live.last_snapshot.metrics.unrealized_pnl_quote_units)
+        )
+        final_cex_pnl_quote = float(final_cex_pnl_quote_units) * float(quote_per_cex_unit)
+
+        for idx in range(chases_count):
+            chase = chases[idx]
+            if str(chase.order_side) == 'BUY':
+                cex_quote_delta_units = -int(chase.filled_quote_units)
+            elif str(chase.order_side) == 'SELL':
+                cex_quote_delta_units = int(chase.filled_quote_units)
+            else:
+                raise RuntimeError(f'FrontendService._build_hedge_chases: bad order_side: {chase.order_side}')
+
+            cex_quote_balance_units = int(cex_quote_balance_units) + int(cex_quote_delta_units)
+            is_final_pnl = int(idx) == int(chases_count - 1)
+            cex_pnl_quote = float(cex_quote_balance_units) * float(quote_per_cex_unit)
+            if bool(is_final_pnl):
+                cex_pnl_quote = float(final_cex_pnl_quote)
+
             out.append(
                 FrontendIterationHedgeChaseRow(
                     kind=str(chase.kind),
@@ -999,6 +1090,9 @@ class FrontendService:
                     exchange_errors=int(chase.exchange_errors),
                     ok=None if chase.ok is None else bool(chase.ok),
                     error=None if chase.error is None else str(chase.error),
+                    cex_quote_balance_units=int(cex_quote_balance_units),
+                    cex_pnl_quote=float(cex_pnl_quote),
+                    is_final_pnl=bool(is_final_pnl),
                 )
             )
 
@@ -1074,3 +1168,28 @@ class FrontendService:
             raise RuntimeError('FrontendService._build_rpc_url_for_network: rpc_key is empty')
 
         return str(rpc_url_template).replace('{RPC_KEY}', str(rpc_key))
+
+    def _build_ws_url_for_network(self, network: str) -> str:
+        if not isinstance(network, str) or len(network) == 0:
+            raise RuntimeError('FrontendService._build_ws_url_for_network: network is empty')
+
+        network_config = None
+        for item in self._network_configs:
+            if str(item.key) == str(network):
+                network_config = item
+                break
+
+        if network_config is None:
+            raise RuntimeError(f'FrontendService._build_ws_url_for_network: network not found: {network}')
+
+        ws_url_template = str(network_config.ws_url_template)
+        if len(ws_url_template) == 0:
+            raise RuntimeError(f'FrontendService._build_ws_url_for_network: ws_url_template is empty for network={network}')
+        if '{RPC_KEY}' not in ws_url_template:
+            raise RuntimeError(f'FrontendService._build_ws_url_for_network: ws_url_template does not contain {{RPC_KEY}} for network={network}')
+
+        rpc_key = str(self._runtime.rpc_key)
+        if len(rpc_key) == 0:
+            raise RuntimeError('FrontendService._build_ws_url_for_network: rpc_key is empty')
+
+        return str(ws_url_template).replace('{RPC_KEY}', str(rpc_key))

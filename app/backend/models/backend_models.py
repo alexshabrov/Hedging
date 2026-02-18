@@ -9,6 +9,8 @@ import orjson
 
 from live.lib.strict_model import StrictModel
 from backend.models.hedger_models import HedgerConfig, HedgerStats
+from backend.models.mock_hedge_models import MockHedgeBoundary
+from backend.models.mock_hedge_models import MockHedgeBoundary
 from backend.modules.hedger_helper import HedgerPnlStats
 
 
@@ -80,6 +82,8 @@ class BackendRunAggregates(StrictModel):
     sum_costs_quote: float
     sum_total_pnl_with_hedge_quote: float
     sum_total_pnl_without_hedge_quote: float
+    close_trigger_upper_count: int
+    close_trigger_lower_count: int
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
@@ -92,6 +96,8 @@ class BackendRunAggregates(StrictModel):
             'sum_costs_quote': float(self.sum_costs_quote),
             'sum_total_pnl_with_hedge_quote': float(self.sum_total_pnl_with_hedge_quote),
             'sum_total_pnl_without_hedge_quote': float(self.sum_total_pnl_without_hedge_quote),
+            'close_trigger_upper_count': int(self.close_trigger_upper_count),
+            'close_trigger_lower_count': int(self.close_trigger_lower_count),
         }
 
     @classmethod
@@ -106,6 +112,8 @@ class BackendRunAggregates(StrictModel):
             sum_costs_quote=0.0,
             sum_total_pnl_with_hedge_quote=0.0,
             sum_total_pnl_without_hedge_quote=0.0,
+            close_trigger_upper_count=0,
+            close_trigger_lower_count=0,
         )
 
 
@@ -116,6 +124,7 @@ class BackendIterationRecord(StrictModel):
     started_at_ms: int
     finished_at_ms: int
     status: str
+    close_trigger_side: Optional[MockHedgeBoundary]
     error: Optional[str]
     stats: HedgerStats
     pnl: HedgerPnlStats
@@ -132,6 +141,7 @@ class BackendIterationRecord(StrictModel):
             'started_at_ms': int(self.started_at_ms),
             'finished_at_ms': int(self.finished_at_ms),
             'status': self.status,
+            'close_trigger_side': None if self.close_trigger_side is None else str(self.close_trigger_side.value),
             'error': self.error,
             'stats': self.stats.model_dump(),
             'pnl': self.pnl.model_dump(),
@@ -150,6 +160,11 @@ class BackendPositionView(StrictModel):
     runtime_dhm: str
     avg_iteration_lifetime_sec: float
     iterations_finished: int
+    close_trigger_upper_count: int = 0
+    close_trigger_lower_count: int = 0
+    close_trigger_total_count: int = 0
+    close_trigger_upper_pct: float = 0.0
+    close_trigger_lower_pct: float = 0.0
     status: BackendRunLifecycle
     market_price: Optional[float]
     price_lower: Optional[float]
@@ -177,6 +192,11 @@ class BackendPositionView(StrictModel):
             'runtime_dhm': self.runtime_dhm,
             'avg_iteration_lifetime_sec': float(self.avg_iteration_lifetime_sec),
             'iterations_finished': int(self.iterations_finished),
+            'close_trigger_upper_count': int(self.close_trigger_upper_count),
+            'close_trigger_lower_count': int(self.close_trigger_lower_count),
+            'close_trigger_total_count': int(self.close_trigger_total_count),
+            'close_trigger_upper_pct': float(self.close_trigger_upper_pct),
+            'close_trigger_lower_pct': float(self.close_trigger_lower_pct),
             'status': self.status.value,
             'market_price': None if self.market_price is None else float(self.market_price),
             'price_lower': None if self.price_lower is None else float(self.price_lower),

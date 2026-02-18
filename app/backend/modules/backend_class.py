@@ -11,6 +11,7 @@ from flask import Flask, Response, request
 from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
+from live.logic.models import HedgeLeg
 from backend.models.hedger_models import HedgerConfig, HedgerStats
 from backend.models.backend_models import (
     BackendRunLifecycle,
@@ -19,6 +20,7 @@ from backend.models.backend_models import (
     BackendIterationRecord,
     BackendPositionView,
 )
+from backend.models.mock_hedge_models import MockHedgeBoundary
 from backend.modules.hedger_class import Hedger
 from backend.modules.hedger_helper import calc_hedger_pnl_stats
 from backend.modules.backend_env import read_runtime_secrets
@@ -38,8 +40,8 @@ class BackendRunContext:
         self,
         run_id: str,
         config: HedgerConfig,
-        binance_key: str,
-        binance_secret: str,
+        binance_key: Optional[str],
+        binance_secret: Optional[str],
         private_key: str,
         wallet_address: Optional[str],
         template_id: Optional[str] = None,
@@ -47,8 +49,8 @@ class BackendRunContext:
         self.run_id = str(run_id)
         self.config = config
         self.template_id = None if template_id is None else str(template_id)
-        self.binance_key = str(binance_key)
-        self.binance_secret = str(binance_secret)
+        self.binance_key = None if binance_key is None else str(binance_key)
+        self.binance_secret = None if binance_secret is None else str(binance_secret)
         self.private_key = str(private_key)
         self.wallet_address = str(wallet_address) if wallet_address is not None else None
 
@@ -87,11 +89,11 @@ class Backend:
 
         self._logger.info('backend_ready')
 
-    def _read_secrets(self) -> Tuple[str, str, str, Optional[str]]:
+    def _read_secrets(self) -> Tuple[Optional[str], Optional[str], str, Optional[str]]:
         binance_key, binance_secret, private_key, wallet_address = read_runtime_secrets()
         return (
-            str(binance_key),
-            str(binance_secret),
+            None if binance_key is None else str(binance_key),
+            None if binance_secret is None else str(binance_secret),
             str(private_key),
             None if wallet_address is None else str(wallet_address),
         )
@@ -300,6 +302,16 @@ class Backend:
             if int(iterations_finished) > 0:
                 avg_iteration_lifetime_sec = float(ctx.aggregates.sum_pool_hold_seconds) / float(iterations_finished)
 
+            close_trigger_upper_count = int(ctx.aggregates.close_trigger_upper_count)
+            close_trigger_lower_count = int(ctx.aggregates.close_trigger_lower_count)
+            close_trigger_total_count = int(close_trigger_upper_count) + int(close_trigger_lower_count)
+
+            close_trigger_upper_pct = 0.0
+            close_trigger_lower_pct = 0.0
+            if int(close_trigger_total_count) > 0:
+                close_trigger_upper_pct = float(close_trigger_upper_count) / float(close_trigger_total_count) * 100.0
+                close_trigger_lower_pct = float(close_trigger_lower_count) / float(close_trigger_total_count) * 100.0
+
             apr_with_hedge_pct = 0.0
             apr_without_hedge_pct = 0.0
             if float(ctx.aggregates.sum_pool_hold_seconds) > 0.0 and float(ctx.config.total_quote) > 0.0:
@@ -349,6 +361,11 @@ class Backend:
                 runtime_dhm=str(runtime_dhm),
                 avg_iteration_lifetime_sec=float(avg_iteration_lifetime_sec),
                 iterations_finished=int(iterations_finished),
+                close_trigger_upper_count=int(close_trigger_upper_count),
+                close_trigger_lower_count=int(close_trigger_lower_count),
+                close_trigger_total_count=int(close_trigger_total_count),
+                close_trigger_upper_pct=float(close_trigger_upper_pct),
+                close_trigger_lower_pct=float(close_trigger_lower_pct),
                 status=ctx.lifecycle,
                 market_price=None if market_price is None else float(market_price),
                 price_lower=None if ctx.config.price_lower is None else float(ctx.config.price_lower),
@@ -579,8 +596,8 @@ class Backend:
 
         hedger = Hedger(
             config=ctx.config,
-            binance_key=str(ctx.binance_key),
-            binance_secret=str(ctx.binance_secret),
+            binance_key=None if ctx.binance_key is None else str(ctx.binance_key),
+            binance_secret=None if ctx.binance_secret is None else str(ctx.binance_secret),
             private_key=str(ctx.private_key),
             wallet_address=str(ctx.wallet_address) if ctx.wallet_address is not None else None,
         )
@@ -655,6 +672,7 @@ class Backend:
         costs_quote = float(pnl.gas_paid_quote) + float(swap_cost_quote)
         pnl_without_hedge_quote = float(pnl.dex_realized_il_quote) + float(pnl.fees_received_quote) - float(costs_quote)
         pnl_with_hedge_quote = float(pnl_without_hedge_quote) + float(pnl.cex_pnl_quote)
+        close_trigger_side = self._resolve_close_trigger_side(stats)
 
         row = BackendIterationRecord(
             id=str(uuid.uuid4().hex),
@@ -663,6 +681,7 @@ class Backend:
             started_at_ms=int(started_at_ms),
             finished_at_ms=int(finished_at_ms),
             status=str(stats.status.value),
+            close_trigger_side=close_trigger_side,
             error=None if stats.error is None else str(stats.error),
             stats=stats,
             pnl=pnl,
@@ -697,6 +716,60 @@ class Backend:
         ctx.aggregates.sum_costs_quote = float(ctx.aggregates.sum_costs_quote) + float(row.costs_quote)
         ctx.aggregates.sum_total_pnl_without_hedge_quote = float(ctx.aggregates.sum_total_pnl_without_hedge_quote) + float(row.pnl_without_hedge_quote)
         ctx.aggregates.sum_total_pnl_with_hedge_quote = float(ctx.aggregates.sum_total_pnl_with_hedge_quote) + float(row.pnl_with_hedge_quote)
+
+        if row.close_trigger_side is None:
+            return
+
+        if row.close_trigger_side == MockHedgeBoundary.UPPER:
+            ctx.aggregates.close_trigger_upper_count = int(ctx.aggregates.close_trigger_upper_count) + 1
+            return
+
+        if row.close_trigger_side == MockHedgeBoundary.LOWER:
+            ctx.aggregates.close_trigger_lower_count = int(ctx.aggregates.close_trigger_lower_count) + 1
+            return
+
+        raise RuntimeError(f'Backend._accumulate_iteration: unsupported close_trigger_side: {row.close_trigger_side}')
+
+    def _resolve_close_trigger_side(self, stats: HedgerStats) -> Optional[MockHedgeBoundary]:
+        if stats is None:
+            raise RuntimeError('Backend._resolve_close_trigger_side: stats is None')
+        if not isinstance(stats, HedgerStats):
+            raise RuntimeError(f'Backend._resolve_close_trigger_side: stats is not HedgerStats: {type(stats)}')
+
+        snap = stats.live.last_snapshot
+        if snap is None:
+            return None
+
+        if snap.close_reason is None:
+            return None
+        close_reason = str(snap.close_reason)
+
+        if close_reason == 'mock_upper':
+            return MockHedgeBoundary.UPPER
+        if close_reason == 'mock_lower':
+            return MockHedgeBoundary.LOWER
+
+        if close_reason == 'target':
+            if snap.opened_leg is None:
+                raise RuntimeError('Backend._resolve_close_trigger_side: opened_leg is None for target close_reason')
+            if snap.opened_leg == HedgeLeg.LONG:
+                return MockHedgeBoundary.UPPER
+            if snap.opened_leg == HedgeLeg.SHORT:
+                return MockHedgeBoundary.LOWER
+            raise RuntimeError(f'Backend._resolve_close_trigger_side: unsupported opened_leg for target close_reason: {snap.opened_leg}')
+
+        if close_reason == 'neutral':
+            return None
+        if close_reason == 'forced':
+            return None
+        if close_reason == 'manual_stop':
+            return None
+        if close_reason == 'mock_closed':
+            return None
+        if close_reason == 'mock_failed':
+            return None
+
+        raise RuntimeError(f'Backend._resolve_close_trigger_side: unsupported close_reason: {close_reason}')
 
     def _calc_swap_cost_quote(self, stats: HedgerStats) -> float:
         if stats is None:

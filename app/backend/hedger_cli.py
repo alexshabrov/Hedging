@@ -2,7 +2,7 @@ import argparse, os, sys
 
 from backend.modules.hedger_class import Hedger
 from backend.modules.hedger_helper import calc_hedger_pnl_stats
-from backend.models.hedger_models import HedgerConfig, CexTriggerMode
+from backend.models.hedger_models import HedgerConfig, CexTriggerMode, MockRealtimeSource
 
 
 ### CLI ###
@@ -95,6 +95,9 @@ def main():
         cowswap_api_timeout_sec=int(args.cowswap_api_timeout_sec),
         cowswap_wait_timeout_sec=int(args.cowswap_wait_timeout_sec),
         cowswap_poll_interval_sec=int(args.cowswap_poll_interval_sec),
+        dex_only=False,
+        mock_realtime_source=MockRealtimeSource.LIVE,
+        dex_ws_url='',
     )
     
     hedger = Hedger(

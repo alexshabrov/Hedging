@@ -13,10 +13,15 @@
                                     <th>Run ID</th>
                                     <th>Token ID</th>
                                     <th>Symbol</th>
+                                    <th>DEX only</th>
+                                    <th>Mock source</th>
                                     <th>Status</th>
                                     <th>Started (UTC)</th>
                                     <th>Runtime (D:H:M)</th>
                                     <th>Iterations</th>
+                                    <th>Close upper</th>
+                                    <th>Close lower</th>
+                                    <th>Close total</th>
                                     <th>Total quote</th>
                                     <th>PnL with hedge</th>
                                     <th>PnL without hedge</th>
@@ -50,10 +55,15 @@
                                             {% endif %}
                                         </td>
                                         <td>{{ row.symbol }}</td>
+                                        <td>{% if row.dex_only %}yes{% else %}no{% endif %}</td>
+                                        <td>{{ row.mock_realtime_source }}</td>
                                         <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
                                         <td>{{ utc_ts(row.first_started_at_ms) }}</td>
                                         <td>{{ row.runtime_dhm }}</td>
                                         <td>{{ row.iterations_finished }}</td>
+                                        <td>{{ row.close_trigger_upper_count }} ({{ '%.2f'|format(row.close_trigger_upper_pct) }}%)</td>
+                                        <td>{{ row.close_trigger_lower_count }} ({{ '%.2f'|format(row.close_trigger_lower_pct) }}%)</td>
+                                        <td>{{ row.close_trigger_total_count }}</td>
                                         <td>{{ '%.4f'|format(row.total_quote) }}</td>
                                         <td>{{ '%.4f'|format(row.pnl_with_hedge_quote) }} ({{ '%.2f'|format(row.pnl_with_hedge_pct) }}%)</td>
                                         <td>{{ '%.4f'|format(row.pnl_without_hedge_quote) }} ({{ '%.2f'|format(row.pnl_without_hedge_pct) }}%)</td>

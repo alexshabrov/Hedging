@@ -154,6 +154,8 @@ class RunsModule:
             total_quote=self._read_float('total_quote'),
             price_lower_pct=self._read_float('price_lower_pct'),
             price_upper_pct=self._read_float('price_upper_pct'),
+            dex_only=self._read_checkbox('dex_only'),
+            mock_source_dex=self._read_checkbox('mock_source_dex'),
         )
 
     def _read_update_template_form(self) -> FrontendUpdateTemplateForm:
@@ -182,3 +184,18 @@ class RunsModule:
 
     def _read_int(self, key: str) -> int:
         return int(self._read_str(key))
+
+    def _read_checkbox(self, key: str) -> bool:
+        if key not in request.form:
+            return False
+
+        value = str(request.form[key]).strip().lower()
+        if value == '1':
+            return True
+        if value == 'on':
+            return True
+        if value == 'true':
+            return True
+        if value == 'yes':
+            return True
+        return False

@@ -26,6 +26,11 @@ class CexTriggerMode(str, Enum):
     UNITS = 'units'
 
 
+class MockRealtimeSource(str, Enum):
+    LIVE = 'live'
+    DEX = 'dex'
+
+
 ### Models ###
 class HedgerConfig(StrictModel):
     symbol: str
@@ -51,6 +56,9 @@ class HedgerConfig(StrictModel):
     cowswap_api_timeout_sec: int = 10
     cowswap_wait_timeout_sec: int = 300
     cowswap_poll_interval_sec: int = 3
+    dex_only: bool
+    mock_realtime_source: MockRealtimeSource
+    dex_ws_url: str
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
@@ -77,6 +85,9 @@ class HedgerConfig(StrictModel):
             'cowswap_api_timeout_sec': int(self.cowswap_api_timeout_sec),
             'cowswap_wait_timeout_sec': int(self.cowswap_wait_timeout_sec),
             'cowswap_poll_interval_sec': int(self.cowswap_poll_interval_sec),
+            'dex_only': bool(self.dex_only),
+            'mock_realtime_source': self.mock_realtime_source.value,
+            'dex_ws_url': self.dex_ws_url,
         }
 
     @classmethod
@@ -85,6 +96,18 @@ class HedgerConfig(StrictModel):
             raise RuntimeError('HedgerConfig.from_dict: data is None')
         if not isinstance(data, dict):
             raise RuntimeError(f'HedgerConfig.from_dict: data is not dict: {type(data)}')
+
+        dex_only = False
+        if 'dex_only' in data:
+            dex_only = bool(data['dex_only'])
+
+        mock_realtime_source = MockRealtimeSource.LIVE
+        if 'mock_realtime_source' in data:
+            mock_realtime_source = MockRealtimeSource(str(data['mock_realtime_source']))
+
+        dex_ws_url = ''
+        if 'dex_ws_url' in data:
+            dex_ws_url = str(data['dex_ws_url'])
 
         return cls(
             symbol=str(data['symbol']),
@@ -110,6 +133,9 @@ class HedgerConfig(StrictModel):
             cowswap_api_timeout_sec=int(data['cowswap_api_timeout_sec']),
             cowswap_wait_timeout_sec=int(data['cowswap_wait_timeout_sec']),
             cowswap_poll_interval_sec=int(data['cowswap_poll_interval_sec']),
+            dex_only=bool(dex_only),
+            mock_realtime_source=mock_realtime_source,
+            dex_ws_url=str(dex_ws_url),
         )
 
 

@@ -13,10 +13,39 @@ from backend.models.backend_models import (
     BackendStartRunRequest,
 )
 from backend.models.hedger_models import CexTriggerMode, HedgerConfig
+from backend.models.mock_hedge_models import MockHedgeBoundary
 from dex.contract.params import Params
 
 
 def frontend_position_view_from_dict(data: dict) -> BackendPositionView:
+    close_trigger_upper_count = 0
+    if 'close_trigger_upper_count' in data:
+        close_trigger_upper_count = int(data['close_trigger_upper_count'])
+
+    close_trigger_lower_count = 0
+    if 'close_trigger_lower_count' in data:
+        close_trigger_lower_count = int(data['close_trigger_lower_count'])
+
+    close_trigger_total_count = int(close_trigger_upper_count) + int(close_trigger_lower_count)
+    if 'close_trigger_total_count' in data:
+        close_trigger_total_count = int(data['close_trigger_total_count'])
+
+    close_trigger_upper_pct = 0.0
+    if 'close_trigger_upper_pct' in data:
+        close_trigger_upper_pct = float(data['close_trigger_upper_pct'])
+
+    close_trigger_lower_pct = 0.0
+    if 'close_trigger_lower_pct' in data:
+        close_trigger_lower_pct = float(data['close_trigger_lower_pct'])
+
+    token_id = None
+    if 'token_id' in data and data['token_id'] is not None:
+        token_id = int(data['token_id'])
+
+    last_error = None
+    if 'last_error' in data and data['last_error'] is not None:
+        last_error = str(data['last_error'])
+
     return BackendPositionView(
         run_id=str(data['run_id']),
         symbol=str(data['symbol']),
@@ -25,6 +54,11 @@ def frontend_position_view_from_dict(data: dict) -> BackendPositionView:
         runtime_dhm=str(data['runtime_dhm']),
         avg_iteration_lifetime_sec=float(data['avg_iteration_lifetime_sec']),
         iterations_finished=int(data['iterations_finished']),
+        close_trigger_upper_count=int(close_trigger_upper_count),
+        close_trigger_lower_count=int(close_trigger_lower_count),
+        close_trigger_total_count=int(close_trigger_total_count),
+        close_trigger_upper_pct=float(close_trigger_upper_pct),
+        close_trigger_lower_pct=float(close_trigger_lower_pct),
         status=BackendRunLifecycle(str(data['status'])),
         market_price=None if data['market_price'] is None else float(data['market_price']),
         price_lower=None if data['price_lower'] is None else float(data['price_lower']),
@@ -40,8 +74,8 @@ def frontend_position_view_from_dict(data: dict) -> BackendPositionView:
         price_pnl_quote=float(data['price_pnl_quote']),
         hedge_pnl_quote=float(data['hedge_pnl_quote']),
         costs_quote=float(data['costs_quote']),
-        token_id=None if data.get('token_id') is None else int(data['token_id']),
-        last_error=None if data['last_error'] is None else str(data['last_error']),
+        token_id=token_id,
+        last_error=last_error,
     )
 
 
@@ -134,6 +168,7 @@ class FrontendBackendPositionsResponse(StrictModel):
 class FrontendDexNetworkConfig(StrictModel):
     key: str
     rpc_url_template: str
+    ws_url_template: str
     stables: List[str]
     npm: str
 
@@ -153,6 +188,7 @@ def frontend_dex_network_configs_from_params() -> List['FrontendDexNetworkConfig
             FrontendDexNetworkConfig(
                 key=str(network_key),
                 rpc_url_template=str(network_data['rpc_url_template']),
+                ws_url_template=str(network_data['ws_url_template']),
                 stables=stables,
                 npm=str(network_data['npm']),
             )
@@ -235,6 +271,8 @@ class FrontendStartFromTemplateForm(StrictModel):
     total_quote: float
     price_lower_pct: float
     price_upper_pct: float
+    dex_only: bool
+    mock_source_dex: bool
 
 
 class FrontendUpdateTemplateForm(StrictModel):
@@ -599,6 +637,7 @@ class FrontendIterationDoc(StrictModel):
     started_at_ms: int
     finished_at_ms: int
     status: str
+    close_trigger_side: Optional[MockHedgeBoundary]
     error: Optional[str]
     stats: FrontendIterationStats
     pnl: FrontendIterationPnl
@@ -618,6 +657,7 @@ class FrontendIterationDoc(StrictModel):
             started_at_ms=int(data['started_at_ms']),
             finished_at_ms=int(data['finished_at_ms']),
             status=str(data['status']),
+            close_trigger_side=None if data['close_trigger_side'] is None else MockHedgeBoundary(str(data['close_trigger_side'])),
             error=None if data['error'] is None else str(data['error']),
             stats=FrontendIterationStats.from_dict(data['stats']),
             pnl=FrontendIterationPnl.from_dict(data['pnl']),
@@ -635,12 +675,19 @@ class FrontendPositionRow(StrictModel):
     run_id: str
     network: str
     symbol: str
+    dex_only: bool
+    mock_realtime_source: str
     status: BackendRunLifecycle
     first_started_at_ms: int
     runtime_sec: float
     runtime_dhm: str
     avg_iteration_lifetime_sec: float
     iterations_finished: int
+    close_trigger_upper_count: int
+    close_trigger_lower_count: int
+    close_trigger_total_count: int
+    close_trigger_upper_pct: float
+    close_trigger_lower_pct: float
     market_price: Optional[float]
     price_lower: Optional[float]
     price_upper: Optional[float]
@@ -677,12 +724,19 @@ class FrontendPositionRow(StrictModel):
             'run_id': self.run_id,
             'network': self.network,
             'symbol': self.symbol,
+            'dex_only': bool(self.dex_only),
+            'mock_realtime_source': str(self.mock_realtime_source),
             'status': self.status.value,
             'first_started_at_ms': int(self.first_started_at_ms),
             'runtime_sec': float(self.runtime_sec),
             'runtime_dhm': self.runtime_dhm,
             'avg_iteration_lifetime_sec': float(self.avg_iteration_lifetime_sec),
             'iterations_finished': int(self.iterations_finished),
+            'close_trigger_upper_count': int(self.close_trigger_upper_count),
+            'close_trigger_lower_count': int(self.close_trigger_lower_count),
+            'close_trigger_total_count': int(self.close_trigger_total_count),
+            'close_trigger_upper_pct': float(self.close_trigger_upper_pct),
+            'close_trigger_lower_pct': float(self.close_trigger_lower_pct),
             'market_price': None if self.market_price is None else float(self.market_price),
             'price_lower': None if self.price_lower is None else float(self.price_lower),
             'price_upper': None if self.price_upper is None else float(self.price_upper),
@@ -725,6 +779,7 @@ class FrontendIterationRow(StrictModel):
     runtime_sec: float
     status: str
     close_reason: Optional[str]
+    close_trigger_side: Optional[MockHedgeBoundary]
     total_quote: float
     price_lower: Optional[float]
     price_upper: Optional[float]
@@ -758,6 +813,7 @@ class FrontendIterationRow(StrictModel):
             'runtime_sec': float(self.runtime_sec),
             'status': self.status,
             'close_reason': self.close_reason,
+            'close_trigger_side': None if self.close_trigger_side is None else str(self.close_trigger_side.value),
             'total_quote': float(self.total_quote),
             'price_lower': None if self.price_lower is None else float(self.price_lower),
             'price_upper': None if self.price_upper is None else float(self.price_upper),
@@ -852,6 +908,23 @@ class FrontendIterationHedgeBlock(StrictModel):
     opened_ms: int
     closed_ms: int
     close_reason: Optional[str]
+    close_trigger_side: Optional[MockHedgeBoundary]
+
+    def model_dump(self) -> dict:  # type: ignore[override]
+        return {
+            'activated': bool(self.activated),
+            'activation_price': None if self.activation_price is None else float(self.activation_price),
+            'hedge_quote': float(self.hedge_quote),
+            'opened_leg': self.opened_leg,
+            'opened_base_units': int(self.opened_base_units),
+            'cex_pnl_quote': float(self.cex_pnl_quote),
+            'realized_pnl_quote_units': int(self.realized_pnl_quote_units),
+            'unrealized_pnl_quote_units': int(self.unrealized_pnl_quote_units),
+            'opened_ms': int(self.opened_ms),
+            'closed_ms': int(self.closed_ms),
+            'close_reason': self.close_reason,
+            'close_trigger_side': None if self.close_trigger_side is None else str(self.close_trigger_side.value),
+        }
 
 
 class FrontendIterationRebalanceBlock(StrictModel):
@@ -880,11 +953,19 @@ class FrontendIterationHedgeChaseRow(StrictModel):
     exchange_errors: int
     ok: Optional[bool]
     error: Optional[str]
+    cex_quote_balance_units: int
+    cex_pnl_quote: float
+    is_final_pnl: bool
 
 
 class FrontendDashboardView(StrictModel):
     active_runs: int
     finished_iterations: int
+    close_trigger_upper_count: int
+    close_trigger_lower_count: int
+    close_trigger_total_count: int
+    close_trigger_upper_pct: float
+    close_trigger_lower_pct: float
     total_pnl_with_hedge_quote: float
     total_pnl_without_hedge_quote: float
     total_costs_quote: float
@@ -897,6 +978,11 @@ class FrontendDashboardView(StrictModel):
         return {
             'active_runs': int(self.active_runs),
             'finished_iterations': int(self.finished_iterations),
+            'close_trigger_upper_count': int(self.close_trigger_upper_count),
+            'close_trigger_lower_count': int(self.close_trigger_lower_count),
+            'close_trigger_total_count': int(self.close_trigger_total_count),
+            'close_trigger_upper_pct': float(self.close_trigger_upper_pct),
+            'close_trigger_lower_pct': float(self.close_trigger_lower_pct),
             'total_pnl_with_hedge_quote': float(self.total_pnl_with_hedge_quote),
             'total_pnl_without_hedge_quote': float(self.total_pnl_without_hedge_quote),
             'total_costs_quote': float(self.total_costs_quote),

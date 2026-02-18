@@ -47,9 +47,14 @@
                                     </td>
                                 </tr>
                                 <tr><th>Symbol</th><td id="run-symbol">{{ details.position.symbol }}</td></tr>
+                                <tr><th>DEX only</th><td id="run-dex-only">{% if details.position.dex_only %}yes{% else %}no{% endif %}</td></tr>
+                                <tr><th>Mock source</th><td id="run-mock-source">{{ details.position.mock_realtime_source }}</td></tr>
                                 <tr><th>Started (UTC)</th><td id="run-started">{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
                                 <tr><th>Runtime</th><td id="run-runtime">{{ details.position.runtime_dhm }}</td></tr>
                                 <tr><th>Total quote</th><td id="run-total-quote">{{ '%.4f'|format(details.position.total_quote) }}</td></tr>
+                                <tr><th>Close trigger: upper</th><td id="run-close-upper">{{ details.position.close_trigger_upper_count }} ({{ '%.2f'|format(details.position.close_trigger_upper_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: lower</th><td id="run-close-lower">{{ details.position.close_trigger_lower_count }} ({{ '%.2f'|format(details.position.close_trigger_lower_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: total</th><td id="run-close-total">{{ details.position.close_trigger_total_count }}</td></tr>
                                 <tr><th>PnL: fees</th><td id="run-pnl-fees">{{ '%.4f'|format(details.position.pnl_fees_quote) }}</td></tr>
                                 <tr><th>PnL: fees + il</th><td id="run-pnl-fees-il">{{ '%.4f'|format(details.position.pnl_fees_il_quote) }}</td></tr>
                                 <tr><th>PnL: fees + il + gas</th><td id="run-pnl-fees-il-gas">{{ '%.4f'|format(details.position.pnl_fees_il_gas_quote) }}</td></tr>
@@ -79,6 +84,9 @@
                                 <tr><th>Pool</th><td>{{ details.config.pool_address }}</td></tr>
                                 <tr><th>Fee %</th><td>{{ details.config.fee_pct }}</td></tr>
                                 <tr><th>CEX ratio</th><td>{{ details.config.cex_ratio }}</td></tr>
+                                <tr><th>DEX only</th><td>{% if details.config.dex_only %}yes{% else %}no{% endif %}</td></tr>
+                                <tr><th>Mock source</th><td>{{ details.config.mock_realtime_source }}</td></tr>
+                                <tr><th>DEX WS URL</th><td>{{ details.config.dex_ws_url }}</td></tr>
                                 <tr><th>Trigger mode</th><td>{{ details.config.trigger_mode }}</td></tr>
                                 <tr><th>Trigger %</th><td>{{ details.config.trigger_pct }}</td></tr>
                                 <tr><th>Trigger units</th><td>{{ details.config.trigger_units }}</td></tr>
@@ -112,6 +120,7 @@
                                     <th>Finish</th>
                                     <th>Runtime sec</th>
                                     <th>Close reason</th>
+                                    <th>Close trigger side</th>
                                     <th>PnL: fees</th>
                                     <th>PnL: fees + il</th>
                                     <th>PnL: fees + il + gas</th>
@@ -132,6 +141,7 @@
                                         <td>{{ utc_ts(row.finished_at_ms) }}</td>
                                         <td>{{ '%.2f'|format(row.runtime_sec) }}</td>
                                         <td>{{ row.close_reason }}</td>
+                                        <td>{{ row.close_trigger_side if row.close_trigger_side else '-' }}</td>
                                         <td>{{ '%.4f'|format(row.pnl_fees_quote) }}</td>
                                         <td>{{ '%.4f'|format(row.pnl_fees_il_quote) }}</td>
                                         <td>{{ '%.4f'|format(row.pnl_fees_il_gas_quote) }}</td>

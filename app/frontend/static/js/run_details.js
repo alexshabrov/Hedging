@@ -81,6 +81,18 @@
             ' ' + p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) + ':' + p2(d.getUTCSeconds());
     }
 
+    function fmtSideShare(count, pct) {
+        var countNum = Number(count);
+        var pctNum = Number(pct);
+        if (!Number.isFinite(countNum) || countNum < 0) {
+            return '-';
+        }
+        if (!Number.isFinite(pctNum)) {
+            return String(Math.trunc(countNum));
+        }
+        return String(Math.trunc(countNum)) + ' (' + pctNum.toFixed(2) + '%)';
+    }
+
     function applyActionButtons(status, tokenId) {
         var stopWrap = byId('run-stop-wrap');
         var collectWrap = byId('run-collect-wrap');
@@ -147,6 +159,7 @@
             td(utcTs(row.finished_at_ms));
             td(fmt2(row.runtime_sec));
             td(row.close_reason || '');
+            td(row.close_trigger_side || '-');
             td(fmt4(row.pnl_fees_quote));
             td(fmt4(row.pnl_fees_il_quote));
             td(fmt4(row.pnl_fees_il_gas_quote));
@@ -168,9 +181,14 @@
         setText('run-token-id', p.token_id);
         setHtml('run-token-links', tokenLinksHtml(p.pool_url, p.revert_link));
         setText('run-symbol', p.symbol);
+        setText('run-dex-only', p.dex_only ? 'yes' : 'no');
+        setText('run-mock-source', p.mock_realtime_source);
         setText('run-started', utcTs(p.first_started_at_ms));
         setText('run-runtime', p.runtime_dhm);
         setText('run-total-quote', fmt4(p.total_quote));
+        setText('run-close-upper', fmtSideShare(p.close_trigger_upper_count, p.close_trigger_upper_pct));
+        setText('run-close-lower', fmtSideShare(p.close_trigger_lower_count, p.close_trigger_lower_pct));
+        setText('run-close-total', p.close_trigger_total_count);
         setText('run-pnl-fees', fmt4(p.pnl_fees_quote));
         setText('run-pnl-fees-il', fmt4(p.pnl_fees_il_quote));
         setText('run-pnl-fees-il-gas', fmt4(p.pnl_fees_il_gas_quote));

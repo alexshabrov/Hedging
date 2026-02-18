@@ -23,6 +23,9 @@
                             <tbody>
                                 <tr><th>Active runs</th><td>{{ dashboard.active_runs }}</td></tr>
                                 <tr><th>Finished iterations</th><td>{{ dashboard.finished_iterations }}</td></tr>
+                                <tr><th>Close trigger: upper</th><td>{{ dashboard.close_trigger_upper_count }} ({{ '%.2f'|format(dashboard.close_trigger_upper_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: lower</th><td>{{ dashboard.close_trigger_lower_count }} ({{ '%.2f'|format(dashboard.close_trigger_lower_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: total</th><td>{{ dashboard.close_trigger_total_count }}</td></tr>
                                 <tr><th>Total PnL with hedge</th><td>{{ '%.6f'|format(dashboard.total_pnl_with_hedge_quote) }}</td></tr>
                                 <tr><th>Total PnL without hedge</th><td>{{ '%.6f'|format(dashboard.total_pnl_without_hedge_quote) }}</td></tr>
                                 <tr><th>Total gas/costs PnL quote</th><td>{{ '%.6f'|format(dashboard.total_costs_quote) }}</td></tr>

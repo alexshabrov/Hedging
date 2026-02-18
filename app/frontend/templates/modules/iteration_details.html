@@ -16,6 +16,7 @@
                                 <tr><th>Run ID</th><td>{{ details.row.run_id }}</td></tr>
                                 <tr><th>Status</th><td>{% with status=details.row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
                                 <tr><th>Close reason</th><td>{{ details.row.close_reason }}</td></tr>
+                                <tr><th>Close trigger side</th><td>{{ details.row.close_trigger_side if details.row.close_trigger_side else '-' }}</td></tr>
                                 <tr><th>Started</th><td>{{ utc_ts(details.row.started_at_ms) }}</td></tr>
                                 <tr><th>Finished</th><td>{{ utc_ts(details.row.finished_at_ms) }}</td></tr>
                                 <tr><th>Runtime sec</th><td>{{ '%.4f'|format(details.row.runtime_sec) }}</td></tr>
@@ -63,6 +64,7 @@
                                 <tr><th>Opened (UTC)</th><td>{{ utc_ts(details.hedge.opened_ms) }}</td></tr>
                                 <tr><th>Closed (UTC)</th><td>{{ utc_ts(details.hedge.closed_ms) }}</td></tr>
                                 <tr><th>Close reason</th><td>{{ details.hedge.close_reason }}</td></tr>
+                                <tr><th>Close trigger side</th><td>{{ details.hedge.close_trigger_side if details.hedge.close_trigger_side else '-' }}</td></tr>
                             </tbody>
                         </table>
 
@@ -92,6 +94,8 @@
                                     <th>Side</th>
                                     <th>Filled base</th>
                                     <th>Filled quote</th>
+                                    <th>CEX quote balance units</th>
+                                    <th>CEX PnL quote</th>
                                     <th>Avg price units</th>
                                     <th>Slippage x10000</th>
                                     <th>GTX violations</th>
@@ -101,14 +105,23 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for chase in details.hedge_chases %}
-                                    <tr>
+                                {% for chase in details.hedge_chases|sort(attribute='started_ms', reverse=True) %}
+                                    <tr{% if chase.is_final_pnl %} class="table-success"{% endif %}>
                                         <td>{{ chase.kind }}</td>
                                         <td>{{ utc_ts(chase.started_ms) }}</td>
                                         <td>{{ utc_ts(chase.finished_ms) }}</td>
                                         <td>{{ chase.order_side }}</td>
                                         <td>{{ chase.filled_base_units }}</td>
                                         <td>{{ chase.filled_quote_units }}</td>
+                                        <td>{{ chase.cex_quote_balance_units }}</td>
+                                        <td>
+                                            {% if chase.is_final_pnl %}
+                                                <span class="font-weight-bold">{{ '%.6f'|format(chase.cex_pnl_quote) }}</span>
+                                                <span class="badge badge-success ml-1">FINAL</span>
+                                            {% else %}
+                                                {{ '%.6f'|format(chase.cex_pnl_quote) }}
+                                            {% endif %}
+                                        </td>
                                         <td>{{ chase.avg_price_units }}</td>
                                         <td>{{ chase.slippage_pct_x10000 }}</td>
                                         <td>{{ chase.gtx_violations }}</td>
