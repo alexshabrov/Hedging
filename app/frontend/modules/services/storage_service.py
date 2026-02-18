@@ -111,6 +111,17 @@ class StorageService:
             out.append(item)
         return out
 
+    def list_iterations_all(self) -> List[FrontendIterationDoc]:
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort([('run_id', 1), ('iteration_no', 1)])
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_iterations_all: item is not dict: {type(item)}')
+            out.append(FrontendIterationDoc.from_dict(item))
+        return out
+
     def list_iterations_all_raw(self) -> List[dict]:
         col = self._db[str(HEDGER_RUNS_COLLECTION)]
         cursor = col.find({}, {'_id': 0}).sort([('run_id', 1), ('iteration_no', 1)])

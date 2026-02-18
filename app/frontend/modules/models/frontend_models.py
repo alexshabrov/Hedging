@@ -547,6 +547,7 @@ class FrontendHedgeChase(StrictModel):
 
 
 class FrontendHedgeMetrics(StrictModel):
+    last_mid_price_units: int
     realized_pnl_quote_units: int
     unrealized_pnl_quote_units: int
     opened_ms: int
@@ -560,6 +561,7 @@ class FrontendHedgeMetrics(StrictModel):
             chases.append(FrontendHedgeChase.from_dict(item))
 
         return cls(
+            last_mid_price_units=int(data['last_mid_price_units']),
             realized_pnl_quote_units=int(data['realized_pnl_quote_units']),
             unrealized_pnl_quote_units=int(data['unrealized_pnl_quote_units']),
             opened_ms=int(data['opened_ms']),
@@ -568,10 +570,21 @@ class FrontendHedgeMetrics(StrictModel):
         )
 
 
+class FrontendHedgeSymbolRule(StrictModel):
+    price_step: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'FrontendHedgeSymbolRule':
+        return cls(
+            price_step=str(data['price_step']),
+        )
+
+
 class FrontendHedgeLastSnapshot(StrictModel):
     close_reason: Optional[str]
     opened_leg: Optional[str]
     opened_base_units: int
+    symbol_rule: Optional[FrontendHedgeSymbolRule]
     metrics: FrontendHedgeMetrics
 
     @classmethod
@@ -580,6 +593,7 @@ class FrontendHedgeLastSnapshot(StrictModel):
             close_reason=None if data['close_reason'] is None else str(data['close_reason']),
             opened_leg=None if data['opened_leg'] is None else str(data['opened_leg']),
             opened_base_units=int(data['opened_base_units']),
+            symbol_rule=None if data['symbol_rule'] is None else FrontendHedgeSymbolRule.from_dict(data['symbol_rule']),
             metrics=FrontendHedgeMetrics.from_dict(data['metrics']),
         )
 
@@ -674,6 +688,35 @@ class FrontendIterationDoc(StrictModel):
             created_at_ms=int(data['created_at_ms']),
             run_lifecycle=str(data['run_lifecycle']),
         )
+
+
+### Derived models ###
+class FrontendIterationDerivedPnl(StrictModel):
+    run_id: str
+    iteration_no: int
+    is_finished: bool
+    valuation_price: float
+    fees_quote: float
+    il_base_delta: float
+    il_quote_delta: float
+    il_quote: float
+    cex_quote: float
+    costs_pnl_quote: float
+    pnl_without_hedge_quote: float
+    pnl_with_hedge_quote: float
+    pool_hold_seconds: float
+
+
+class FrontendPnlRecalcAgg(StrictModel):
+    sum_fees_quote: float
+    sum_il_base_delta: float
+    sum_il_quote_delta: float
+    sum_cex_quote: float
+    sum_costs_pnl_quote: float
+    sum_pool_hold_seconds: float
+    last_valuation_price: float
+    last_iteration_no: int
+    iterations_finished: int
 
 
 ### View models ###
