@@ -697,8 +697,6 @@ class FrontendIterationDerivedPnl(StrictModel):
     is_finished: bool
     valuation_price: float
     fees_quote: float
-    il_base_delta: float
-    il_quote_delta: float
     il_quote: float
     cex_quote: float
     costs_pnl_quote: float
@@ -709,13 +707,10 @@ class FrontendIterationDerivedPnl(StrictModel):
 
 class FrontendPnlRecalcAgg(StrictModel):
     sum_fees_quote: float
-    sum_il_base_delta: float
-    sum_il_quote_delta: float
+    sum_il_quote: float
     sum_cex_quote: float
     sum_costs_pnl_quote: float
     sum_pool_hold_seconds: float
-    last_valuation_price: float
-    last_iteration_no: int
     iterations_finished: int
 
 

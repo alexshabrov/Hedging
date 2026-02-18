@@ -850,26 +850,19 @@ class FrontendService:
     def _init_pnl_recalc_agg(self) -> FrontendPnlRecalcAgg:
         return FrontendPnlRecalcAgg(
             sum_fees_quote=0.0,
-            sum_il_base_delta=0.0,
-            sum_il_quote_delta=0.0,
+            sum_il_quote=0.0,
             sum_cex_quote=0.0,
             sum_costs_pnl_quote=0.0,
             sum_pool_hold_seconds=0.0,
-            last_valuation_price=0.0,
-            last_iteration_no=-1,
             iterations_finished=0,
         )
 
     def _accumulate_pnl_recalc_agg(self, agg: FrontendPnlRecalcAgg, calc: FrontendIterationDerivedPnl) -> None:
         agg.sum_fees_quote += float(calc.fees_quote)
-        agg.sum_il_base_delta += float(calc.il_base_delta)
-        agg.sum_il_quote_delta += float(calc.il_quote_delta)
+        agg.sum_il_quote += float(calc.il_quote)
         agg.sum_cex_quote += float(calc.cex_quote)
         agg.sum_costs_pnl_quote += float(calc.costs_pnl_quote)
         agg.sum_pool_hold_seconds += float(calc.pool_hold_seconds)
-        if int(calc.iteration_no) > int(agg.last_iteration_no):
-            agg.last_iteration_no = int(calc.iteration_no)
-            agg.last_valuation_price = float(calc.valuation_price)
         if bool(calc.is_finished):
             agg.iterations_finished += 1
 
@@ -883,13 +876,7 @@ class FrontendService:
         if float(total_quote) <= 0.0:
             raise RuntimeError(f'FrontendService.{source_tag}: total_quote <= 0 for run_id={row.run_id}')
 
-        current_price = float(agg.last_valuation_price)
-        if row.market_price is not None:
-            current_price = float(row.market_price)
-        if float(current_price) <= 0.0:
-            raise RuntimeError(f'FrontendService.{source_tag}: current_price <= 0 for run_id={row.run_id}: {current_price}')
-
-        il_quote = float(agg.sum_il_base_delta) * float(current_price) + float(agg.sum_il_quote_delta)
+        il_quote = float(agg.sum_il_quote)
         pnl_fees_quote = float(agg.sum_fees_quote)
         pnl_fees_il_quote = float(pnl_fees_quote) + float(il_quote)
         pnl_fees_il_gas_quote = float(pnl_fees_il_quote) + float(agg.sum_costs_pnl_quote)
@@ -997,8 +984,6 @@ class FrontendService:
         decrease = uniswap.decrease
         collect = uniswap.collect
 
-        mint_base = 0.0 if mint.amount_base is None else float(mint.amount_base)
-        mint_quote = 0.0 if mint.amount_quote is None else float(mint.amount_quote)
         decrease_base = 0.0 if decrease.amount_base is None else float(decrease.amount_base)
         decrease_quote = 0.0 if decrease.amount_quote is None else float(decrease.amount_quote)
         collect_base = 0.0 if collect.amount_base is None else float(collect.amount_base)
@@ -1011,9 +996,7 @@ class FrontendService:
         cex_units = int(snap.metrics.realized_pnl_quote_units) + int(snap.metrics.unrealized_pnl_quote_units)
         cex_quote = float(cex_units) * float(quote_per_cex_unit)
 
-        il_base_delta = float(decrease_base) - float(mint_base)
-        il_quote_delta = float(decrease_quote) - float(mint_quote)
-        il_quote = float(il_base_delta) * float(valuation_price) + float(il_quote_delta)
+        il_quote = float(item.pnl.dex_realized_il_quote)
 
         fees_quote = (float(collect_quote) - float(decrease_quote)) + (
             (float(collect_base) - float(decrease_base)) * float(valuation_price)
@@ -1048,8 +1031,6 @@ class FrontendService:
             is_finished=str(item.status) == 'finished',
             valuation_price=float(valuation_price),
             fees_quote=float(fees_quote),
-            il_base_delta=float(il_base_delta),
-            il_quote_delta=float(il_quote_delta),
             il_quote=float(il_quote),
             cex_quote=float(cex_quote),
             costs_pnl_quote=float(costs_pnl_quote),

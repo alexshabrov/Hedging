@@ -50,6 +50,9 @@
                         <p class="mb-4">
                             Все PnL в quote-валюте (например, USDC/USDT), все APR в процентах годовых (%).
                         </p>
+                        <p class="mb-4">
+                            Для IL используется единый источник: raw поле <code>pnl.dex_realized_il_quote</code> из документов итераций в БД.
+                        </p>
 
                         <h5>1) Обозначения</h5>
                         <table class="table table-sm table-bordered help-table help-2">
@@ -133,10 +136,10 @@
                                     <td>DEX price PnL</td>
                                     <td>
                                         <code>
-                                            dex_realized_il_quote = (decrease_base - mint_base) * valuation_price + (decrease_quote - mint_quote)
+                                            dex_realized_il_quote = pnl.dex_realized_il_quote
                                         </code>
                                     </td>
-                                    <td>Результат ценового движения LP-позиции.</td>
+                                    <td>Реализованный IL из raw PnL итерации (без локального пересчёта на фронте).</td>
                                 </tr>
                                 <tr>
                                     <td>Fees received quote</td>
