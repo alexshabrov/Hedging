@@ -115,6 +115,7 @@
                                 <tr>
                                     <th>#</th>
                                     <th>ID</th>
+                                    <th>Token</th>
                                     <th>Status</th>
                                     <th>Start</th>
                                     <th>Finish</th>
@@ -136,6 +137,14 @@
                                     <tr>
                                         <td>{{ row.iteration_no }}</td>
                                         <td><a href="/iterations/{{ row.id }}">{{ row.id }}</a></td>
+                                        <td>
+                                            {% if row.token_id is not none %}
+                                                {{ row.token_id }}
+                                                {% if row.revert_link %}<a href="{{ row.revert_link }}" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>{% endif %}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
                                         <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
                                         <td>{{ utc_ts(row.started_at_ms) }}</td>
                                         <td>{{ utc_ts(row.finished_at_ms) }}</td>

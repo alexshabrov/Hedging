@@ -54,6 +54,18 @@
         return links.join('');
     }
 
+    function tokenCellHtml(tokenId, poolUrl, revertUrl) {
+        var tokenNum = Number(tokenId);
+        if (!Number.isFinite(tokenNum) || tokenNum <= 0) {
+            return '-';
+        }
+        var links = [];
+        if (revertUrl !== null && revertUrl !== undefined && String(revertUrl).length > 0) {
+            links.push('<a href="' + escapeHtml(revertUrl) + '" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>');
+        }
+        return escapeHtml(String(Math.trunc(tokenNum))) + (links.length > 0 ? (' ' + links) : '');
+    }
+
     function fmt4(value) {
         var n = Number(value);
         if (!Number.isFinite(n)) {
@@ -152,6 +164,9 @@
             a.textContent = String(row.id);
             tdId.appendChild(a);
             tr.appendChild(tdId);
+            var tdToken = document.createElement('td');
+            tdToken.innerHTML = tokenCellHtml(row.token_id, row.pool_url, row.revert_link);
+            tr.appendChild(tdToken);
             var tdStatus = document.createElement('td');
             tdStatus.innerHTML = statusBadgeHtml(row.status);
             tr.appendChild(tdStatus);

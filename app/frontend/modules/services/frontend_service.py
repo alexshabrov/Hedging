@@ -272,8 +272,6 @@ class FrontendService:
         iteration_docs = self._storage.list_iterations_by_run(run_id)
         iteration_docs_raw = self._storage.list_iterations_by_run_raw(run_id)
         iteration_rows = []
-        for item in iteration_docs:
-            iteration_rows.append(self._build_iteration_row(item))
 
         position_row = None
         config = None
@@ -286,7 +284,7 @@ class FrontendService:
             ]
             position_row = self._build_position_row_common(
                 position=runtime_position,
-                iterations_count=len(iteration_rows),
+                iterations_count=len(iteration_docs),
                 is_active=bool(is_active),
                 network=str(active_doc.config.network),
                 dex_only=bool(active_doc.config.dex_only),
@@ -304,6 +302,10 @@ class FrontendService:
             template_id = archive_doc.template_id
         else:
             raise RuntimeError(f'FrontendService.get_run_details: run not found: {run_id}')
+
+        network_key = str(config.network)
+        for item in iteration_docs:
+            iteration_rows.append(self._build_iteration_row(item, network_key))
 
         if len(iteration_docs_raw) > 0:
             agg = self._init_pnl_recalc_agg()
@@ -367,7 +369,8 @@ class FrontendService:
 
     def get_iteration_details(self, iteration_id: str) -> FrontendIterationDetailsView:
         item = self._storage.find_iteration(iteration_id)
-        iteration_row = self._build_iteration_row(item)
+        network_key = self._resolve_network_by_run_id(str(item.run_id))
+        iteration_row = self._build_iteration_row(item, network_key)
         lp = self._build_lp_block(item)
         hedge = self._build_hedge_block(item)
         rebalance = self._build_rebalance_block(item)
@@ -593,7 +596,7 @@ class FrontendService:
             is_active=bool(is_active),
         )
 
-    def _build_iteration_row(self, row: FrontendIterationDoc) -> FrontendIterationRow:
+    def _build_iteration_row(self, row: FrontendIterationDoc, network: str) -> FrontendIterationRow:
         stats = row.stats
         calc = stats.calc
         live = stats.live
@@ -629,6 +632,14 @@ class FrontendService:
         if live.last_snapshot is not None and live.last_snapshot.close_reason is not None:
             close_reason = str(live.last_snapshot.close_reason)
 
+        token_id = None if stats.uniswap.token_id is None else int(stats.uniswap.token_id)
+        pool_url = None
+        revert_link = None
+        if token_id is not None and int(token_id) > 0:
+            network_key = str(network).lower()
+            pool_url = f'https://app.uniswap.org/positions/v3/{network_key}/{int(token_id)}'
+            revert_link = f'https://revert.finance/#/uniswap-position/{network_key}/{int(token_id)}'
+
         return FrontendIterationRow(
             id=str(row.id),
             run_id=str(row.run_id),
@@ -661,7 +672,24 @@ class FrontendService:
             hedge_pnl_quote=float(row.pnl.cex_pnl_quote),
             costs_quote=float(costs_pnl_quote),
             error=None if row.error is None else str(row.error),
+            token_id=token_id,
+            pool_url=pool_url,
+            revert_link=revert_link,
         )
+
+    def _resolve_network_by_run_id(self, run_id: str) -> str:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('FrontendService._resolve_network_by_run_id: run_id is empty')
+
+        active_doc = self._storage.find_position(run_id)
+        if active_doc is not None:
+            return str(active_doc.config.network)
+
+        archive_doc = self._storage.find_position_archive(run_id)
+        if archive_doc is not None:
+            return str(archive_doc.config.network)
+
+        raise RuntimeError(f'FrontendService._resolve_network_by_run_id: run not found: {run_id}')
 
     def _build_lp_block(self, row: FrontendIterationDoc) -> FrontendIterationLpBlock:
         stats = row.stats

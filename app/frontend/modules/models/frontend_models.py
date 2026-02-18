@@ -483,6 +483,7 @@ class FrontendRebalanceSwap(StrictModel):
 
 
 class FrontendIterationStatsUniswap(StrictModel):
+    token_id: Optional[int]
     mint: Optional[FrontendUniswapMint]
     mint_tx_timestamp_ms: int
     position: Optional[FrontendUniswapPosition]
@@ -494,6 +495,7 @@ class FrontendIterationStatsUniswap(StrictModel):
     @classmethod
     def from_dict(cls, data: dict) -> 'FrontendIterationStatsUniswap':
         return cls(
+            token_id=None if ('token_id' not in data or data['token_id'] is None) else int(data['token_id']),
             mint=None if data['mint'] is None else FrontendUniswapMint.from_dict(data['mint']),
             mint_tx_timestamp_ms=int(data['mint_tx_timestamp_ms']),
             position=None if data['position'] is None else FrontendUniswapPosition.from_dict(data['position']),
@@ -650,6 +652,10 @@ class FrontendIterationDoc(StrictModel):
 
     @classmethod
     def from_dict(cls, data: dict) -> 'FrontendIterationDoc':
+        close_trigger_side = None
+        if 'close_trigger_side' in data and data['close_trigger_side'] is not None:
+            close_trigger_side = MockHedgeBoundary(str(data['close_trigger_side']))
+
         return cls(
             id=str(data['id']),
             run_id=str(data['run_id']),
@@ -657,7 +663,7 @@ class FrontendIterationDoc(StrictModel):
             started_at_ms=int(data['started_at_ms']),
             finished_at_ms=int(data['finished_at_ms']),
             status=str(data['status']),
-            close_trigger_side=None if data['close_trigger_side'] is None else MockHedgeBoundary(str(data['close_trigger_side'])),
+            close_trigger_side=close_trigger_side,
             error=None if data['error'] is None else str(data['error']),
             stats=FrontendIterationStats.from_dict(data['stats']),
             pnl=FrontendIterationPnl.from_dict(data['pnl']),
@@ -802,6 +808,9 @@ class FrontendIterationRow(StrictModel):
     hedge_pnl_quote: float
     costs_quote: float
     error: Optional[str]
+    token_id: Optional[int]
+    pool_url: Optional[str]
+    revert_link: Optional[str]
 
     def model_dump(self) -> dict:  # type: ignore[override]
         return {
@@ -836,6 +845,9 @@ class FrontendIterationRow(StrictModel):
             'hedge_pnl_quote': float(self.hedge_pnl_quote),
             'costs_quote': float(self.costs_quote),
             'error': self.error,
+            'token_id': None if self.token_id is None else int(self.token_id),
+            'pool_url': self.pool_url,
+            'revert_link': self.revert_link,
         }
 
 
