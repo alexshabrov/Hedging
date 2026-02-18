@@ -496,9 +496,24 @@ def _hex_to_int(v) -> int:
     if isinstance(v, str):
         if not v.startswith('0x'):
             raise RuntimeError(f'hex string has no 0x prefix: {v}')
+        if str(v).lower() == '0x':
+            return 0
         return int(v, 16)
 
     raise RuntimeError(f'unsupported numeric type: {type(v)}')
+
+
+def _as_hex(value) -> str:
+    if isinstance(value, str):
+        if not value.startswith('0x'):
+            raise RuntimeError(f'hex string has no 0x prefix: {value}')
+        return str(value)
+    out = Web3.to_hex(value)
+    if not isinstance(out, str):
+        raise RuntimeError(f'hex conversion result is not str: {type(out)}')
+    if not out.startswith('0x'):
+        raise RuntimeError(f'hex conversion result has no 0x prefix: {out}')
+    return str(out)
 
 
 def _decode_uints_from_data(data_hex: str, n_items: int) -> List[int]:
@@ -533,16 +548,6 @@ def _to_float_token(raw: int, decimals: int) -> float:
 
 def _to_quote_pnl(base_delta: float, quote_delta: float, base_price: float) -> float:
     return float(base_delta) * float(base_price) + float(quote_delta)
-
-
-def _portfolio_quote_value(base_amount: float, quote_amount: float, valuation_price: float) -> float:
-    return float(base_amount) * float(valuation_price) + float(quote_amount)
-
-
-def _avg_quote_cost_per_base(base_accum: float, quote_accum: float) -> float:
-    if abs(float(base_accum)) <= 1e-18:
-        raise RuntimeError(f'cannot compute avg quote/base cost with base_accum={base_accum}')
-    return float(quote_accum) / float(base_accum)
 
 
 def _load_first_position_started_at_ms(mongo_uri: str, mongo_db: str) -> int:
@@ -700,7 +705,7 @@ def _topic_to_address(topic_hex: str) -> str:
 
 
 def _topic_to_uint256(topic_obj) -> int:
-    topic_hex = Web3.to_hex(topic_obj)
+    topic_hex = _as_hex(topic_obj)
     if not isinstance(topic_hex, str):
         raise RuntimeError(f'topic_hex is not str: {type(topic_hex)}')
     if not topic_hex.startswith('0x'):
@@ -717,23 +722,26 @@ def _map_pool_amounts_to_weth_usdc(amount0_raw: int, amount1_raw: int, token0_lc
 
 
 def _rpc_call(rpc_url: str, method: str, params: List, request_id: int):
+    method_str = str(method)
+    use_cache = bool(method_str != 'alchemy_getAssetTransfers')
     cache_key = {
         'rpc_url': str(rpc_url),
-        'method': str(method),
+        'method': str(method_str),
         'params': _to_jsonable(params),
     }
-    cached_result = _cache_get(
-        namespace='rpc',
-        cache_key=cache_key,
-        ttl_seconds=None,
-    )
-    if cached_result is not None:
-        return cached_result
+    if bool(use_cache):
+        cached_result = _cache_get(
+            namespace='rpc',
+            cache_key=cache_key,
+            ttl_seconds=None,
+        )
+        if cached_result is not None:
+            return cached_result
 
     payload = {
         'jsonrpc': '2.0',
         'id': int(request_id),
-        'method': str(method),
+        'method': str(method_str),
         'params': params,
     }
 
@@ -750,11 +758,12 @@ def _rpc_call(rpc_url: str, method: str, params: List, request_id: int):
         raise RuntimeError(f'rpc result has no result field: method={method}')
 
     result = data['result']
-    _cache_put(
-        namespace='rpc',
-        cache_key=cache_key,
-        value=result,
-    )
+    if bool(use_cache):
+        _cache_put(
+            namespace='rpc',
+            cache_key=cache_key,
+            value=result,
+        )
     return result
 
 
@@ -1000,6 +1009,7 @@ def _erc20_balance_of_cached(w3: Web3, token_address: str, wallet_address: str, 
 
 def _pool_price_weth_usdc_at_block_cached(
     pool_contract,
+    rpc_hint: str,
     pool_address: str,
     block_number: int,
     token0: TokenMeta,
@@ -1007,6 +1017,7 @@ def _pool_price_weth_usdc_at_block_cached(
     weth_token: TokenMeta,
 ) -> float:
     cache_key = {
+        'rpc_hint': str(rpc_hint),
         'pool_address': str(Web3.to_checksum_address(pool_address)),
         'block_number': int(block_number),
         'token0_address': str(Web3.to_checksum_address(token0.address)),
@@ -1067,9 +1078,7 @@ def _pool_price_weth_usdc_at_block_cached(
 
 
 def _load_token_meta(w3: Web3, token_address: str) -> TokenMeta:
-    rpc_hint = ''
-    if hasattr(w3, 'provider') and hasattr(w3.provider, 'endpoint_uri'):
-        rpc_hint = str(w3.provider.endpoint_uri)
+    rpc_hint = str(_w3_rpc_hint(w3))
     checksum = Web3.to_checksum_address(token_address)
     cache_key = {
         'rpc_hint': str(rpc_hint),
@@ -1269,15 +1278,19 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
             continue
 
         log_addr_lc = str(log['address']).lower()
-        topic0 = Web3.to_hex(topics[0]).lower()
+        topic0 = _as_hex(topics[0]).lower()
 
         if str(topic0) == str(TRANSFER_TOPIC).lower():
+            # Ignore non-target Transfer logs (e.g. ERC721 Transfer with empty data "0x").
+            if str(log_addr_lc) != str(weth_token.address).lower() and str(log_addr_lc) != str(usdc_token.address).lower():
+                continue
+
             if len(topics) < 3:
                 raise RuntimeError(f'transfer log has <3 topics: {tx_hash}')
 
-            from_addr = _topic_to_address(Web3.to_hex(topics[1]))
-            to_addr = _topic_to_address(Web3.to_hex(topics[2]))
-            amount_raw = _hex_to_int(log['data'])
+            from_addr = _topic_to_address(_as_hex(topics[1]))
+            to_addr = _topic_to_address(_as_hex(topics[2]))
+            amount_raw = _hex_to_int(_as_hex(log['data']))
 
             if str(log_addr_lc) == str(weth_token.address).lower():
                 if str(to_addr).lower() == str(wallet_lc):
@@ -1296,7 +1309,7 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
                 if len(topics) < 2:
                     raise RuntimeError(f'IncreaseLiquidity log has <2 topics: {tx_hash}')
                 token_id = int(_topic_to_uint256(topics[1]))
-                vals = _decode_uints_from_data(Web3.to_hex(log['data']), 3)
+                vals = _decode_uints_from_data(_as_hex(log['data']), 3)
                 liquidity_raw = int(vals[0])
                 amount0_raw = int(vals[1])
                 amount1_raw = int(vals[2])
@@ -1322,7 +1335,7 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
                 if len(topics) < 2:
                     raise RuntimeError(f'DecreaseLiquidity log has <2 topics: {tx_hash}')
                 token_id = int(_topic_to_uint256(topics[1]))
-                vals = _decode_uints_from_data(Web3.to_hex(log['data']), 3)
+                vals = _decode_uints_from_data(_as_hex(log['data']), 3)
                 liquidity_raw = int(vals[0])
                 amount0_raw = int(vals[1])
                 amount1_raw = int(vals[2])
@@ -1350,7 +1363,7 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
                 token_id = int(_topic_to_uint256(topics[1]))
                 # NPM Collect event data layout:
                 # [recipient(address padded to 32 bytes), amount0(uint256), amount1(uint256)]
-                vals = _decode_uints_from_data(Web3.to_hex(log['data']), 3)
+                vals = _decode_uints_from_data(_as_hex(log['data']), 3)
                 amount0_raw = int(vals[1])
                 amount1_raw = int(vals[2])
                 collect0_raw += int(amount0_raw)
@@ -1511,6 +1524,7 @@ def _build_report(
         start_block = 0
 
     pool_contract = w3.eth.contract(address=Web3.to_checksum_address(str(pool_address)), abi=POOL_ABI)
+    rpc_hint = str(_w3_rpc_hint(w3))
     pool_price_by_block: Dict[int, float] = {}
     wallet_checksum = Web3.to_checksum_address(str(args.wallet_address))
 
@@ -1591,6 +1605,7 @@ def _build_report(
             if int(tx_block) not in pool_price_by_block:
                 pool_price_by_block[int(tx_block)] = _pool_price_weth_usdc_at_block_cached(
                     pool_contract=pool_contract,
+                    rpc_hint=str(rpc_hint),
                     pool_address=str(pool_address),
                     block_number=int(tx_block),
                     token0=token0,
@@ -1660,6 +1675,7 @@ def _build_report(
             if int(tx_block) not in pool_price_by_block:
                 pool_price_by_block[int(tx_block)] = _pool_price_weth_usdc_at_block_cached(
                     pool_contract=pool_contract,
+                    rpc_hint=str(rpc_hint),
                     pool_address=str(pool_address),
                     block_number=int(tx_block),
                     token0=token0,
