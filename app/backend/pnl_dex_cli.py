@@ -1424,6 +1424,10 @@ def _build_history_tx(w3: Web3, tx_hash: str, block_ts_cache: Dict[int, int], wa
     elif bool(has_collect):
         kind = TxKind.COLLECT
 
+    # Ignore non-pool/non-swap token movements (plain transfers, etc.).
+    if kind == TxKind.OTHER:
+        return None
+
     if (not bool(has_wallet_delta)) and (not bool(has_add)) and (not bool(has_remove)) and (not bool(has_collect)) and (not bool(has_swap_delta)):
         return None
 
