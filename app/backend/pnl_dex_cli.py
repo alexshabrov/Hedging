@@ -3,7 +3,7 @@ Wallet on-chain history and realized PnL report
 Date: 2026-02-15
 Version: 1.1
 """
-import argparse, hashlib, json, os, requests, time
+import argparse, csv, hashlib, json, os, requests, time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 from web3 import Web3
@@ -70,6 +70,29 @@ POOL_ABI = [
     },
 ]
 
+NPM_POSITIONS_ABI = [
+    {
+        'constant': True,
+        'inputs': [{'name': 'tokenId', 'type': 'uint256'}],
+        'name': 'positions',
+        'outputs': [
+            {'name': 'nonce', 'type': 'uint96'},
+            {'name': 'operator', 'type': 'address'},
+            {'name': 'token0', 'type': 'address'},
+            {'name': 'token1', 'type': 'address'},
+            {'name': 'fee', 'type': 'uint24'},
+            {'name': 'tickLower', 'type': 'int24'},
+            {'name': 'tickUpper', 'type': 'int24'},
+            {'name': 'liquidity', 'type': 'uint128'},
+            {'name': 'feeGrowthInside0LastX128', 'type': 'uint256'},
+            {'name': 'feeGrowthInside1LastX128', 'type': 'uint256'},
+            {'name': 'tokensOwed0', 'type': 'uint128'},
+            {'name': 'tokensOwed1', 'type': 'uint128'},
+        ],
+        'type': 'function',
+    },
+]
+
 NETWORK_NPM: Dict[str, str] = {
     'arbitrum': '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     'ethereum': '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
@@ -105,6 +128,20 @@ HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
 CACHE_DIR = '/tmp/pnl_dex_cli_cache_v2'
 CACHE_BINANCE_PRICE_TTL_SEC = 15
 UNISWAP_V3_Q96 = 2 ** 96
+LP_CSV_HEADERS = [
+    'base_price',
+    'price_lower',
+    'price_upper',
+    'minted_base',
+    'minted_quote',
+    'closed_base',
+    'closed_quote',
+    'fees_quote',
+    'add_txids',
+    'remove_txids',
+    'collect_txids',
+    'rebalance_txids',
+]
 
 TRANSFER_TOPIC = Web3.to_hex(Web3.keccak(text='Transfer(address,address,uint256)'))
 INCREASE_LIQ_TOPIC = Web3.to_hex(Web3.keccak(text='IncreaseLiquidity(uint256,uint128,uint256,uint256)'))
@@ -365,6 +402,21 @@ class BalanceSnapshot(StrictModel):
     delta_usdc: float
 
 
+class LpIterationRow(StrictModel):
+    base_price: float
+    price_lower: float
+    price_upper: float
+    minted_base: float
+    minted_quote: float
+    closed_base: float
+    closed_quote: float
+    fees_quote: float
+    add_txids: str
+    remove_txids: str
+    collect_txids: str
+    rebalance_txids: str
+
+
 class HistoryReport(StrictModel):
     wallet: str
     network: str
@@ -377,6 +429,7 @@ class HistoryReport(StrictModel):
     transactions_total: int
     uniswap_swaps_total: int
     analyzed_transactions: List[HistoryTx]
+    lp_iterations: List[LpIterationRow]
 
 
 ### CLI ###
@@ -393,6 +446,7 @@ def parse_args():
     p.add_argument('--alchemy-page-size', type=int, default=1000)
     p.add_argument('--mongo-uri', type=str, default='mongodb://hedging_mongo:27017')
     p.add_argument('--mongo-db', type=str, default='hedging')
+    p.add_argument('--lp-csv-path', type=str, default='')
 
     return p.parse_args()
 
@@ -691,6 +745,132 @@ def _calc_apr(pnl_quote: float, capital_quote: float, hold_seconds: float) -> fl
         return 0.0
     seconds_per_year = 365.0 * 24.0 * 60.0 * 60.0
     return (float(pnl_quote) / float(capital_quote)) * (float(seconds_per_year) / float(hold_seconds)) * 100.0
+
+
+def _load_position_price_bounds(
+    npm_contract,
+    token_id: int,
+    token0: TokenMeta,
+    token1: TokenMeta,
+    usdc_token: TokenMeta,
+) -> Tuple[float, float]:
+    if int(token_id) <= 0:
+        raise RuntimeError(f'token_id must be > 0, got: {token_id}')
+
+    pos = npm_contract.functions.positions(int(token_id)).call()
+    if not isinstance(pos, (list, tuple)):
+        raise RuntimeError(f'positions result is not list/tuple for token_id={token_id}: {type(pos)}')
+    if len(pos) < 7:
+        raise RuntimeError(f'positions result is too short for token_id={token_id}: len={len(pos)}')
+
+    pos_token0 = Web3.to_checksum_address(str(pos[2]))
+    pos_token1 = Web3.to_checksum_address(str(pos[3]))
+    if str(pos_token0).lower() != str(token0.address).lower():
+        raise RuntimeError(
+            f'position token0 mismatch for token_id={token_id}: '
+            f'position={pos_token0} pool={token0.address}'
+        )
+    if str(pos_token1).lower() != str(token1.address).lower():
+        raise RuntimeError(
+            f'position token1 mismatch for token_id={token_id}: '
+            f'position={pos_token1} pool={token1.address}'
+        )
+
+    tick_lower = int(pos[5])
+    tick_upper = int(pos[6])
+    if int(tick_lower) >= int(tick_upper):
+        raise RuntimeError(f'tick_lower >= tick_upper for token_id={token_id}: {tick_lower} >= {tick_upper}')
+
+    pool_price_lower = (1.0001 ** int(tick_lower)) * (10 ** (int(token0.decimals) - int(token1.decimals)))
+    pool_price_upper = (1.0001 ** int(tick_upper)) * (10 ** (int(token0.decimals) - int(token1.decimals)))
+    if float(pool_price_lower) <= 0.0 or float(pool_price_upper) <= 0.0:
+        raise RuntimeError(
+            f'pool bounds price <= 0 for token_id={token_id}: '
+            f'lower={pool_price_lower} upper={pool_price_upper}'
+        )
+
+    quote_lc = str(usdc_token.address).lower()
+    token0_lc = str(token0.address).lower()
+    token1_lc = str(token1.address).lower()
+
+    if token1_lc == quote_lc:
+        price_a = float(pool_price_lower)
+        price_b = float(pool_price_upper)
+    elif token0_lc == quote_lc:
+        price_a = 1.0 / float(pool_price_lower)
+        price_b = 1.0 / float(pool_price_upper)
+    else:
+        raise RuntimeError(
+            f'quote token is not in pool orientation for token_id={token_id}: '
+            f'token0={token0.address} token1={token1.address} quote={usdc_token.address}'
+        )
+
+    price_lower = min(float(price_a), float(price_b))
+    price_upper = max(float(price_a), float(price_b))
+    if float(price_lower) <= 0.0 or float(price_upper) <= 0.0:
+        raise RuntimeError(
+            f'traditional bounds price <= 0 for token_id={token_id}: '
+            f'lower={price_lower} upper={price_upper}'
+        )
+    if float(price_lower) >= float(price_upper):
+        raise RuntimeError(
+            f'traditional bounds are invalid for token_id={token_id}: '
+            f'lower={price_lower} upper={price_upper}'
+        )
+
+    return float(price_lower), float(price_upper)
+
+
+def _default_lp_csv_path() -> str:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_name = os.path.splitext(os.path.basename(__file__))[0]
+    return os.path.join(str(script_dir), f'{script_name}.csv')
+
+
+def _append_unique_id(existing_ids: str, new_id: str) -> str:
+    existing_norm = '' if existing_ids is None else str(existing_ids).strip()
+    new_norm = '' if new_id is None else str(new_id).strip()
+    if len(new_norm) == 0:
+        return str(existing_norm)
+    if len(existing_norm) == 0:
+        return str(new_norm)
+
+    parts = str(existing_norm).split('|')
+    for part in parts:
+        if str(part).strip() == str(new_norm):
+            return str(existing_norm)
+    return f'{existing_norm}|{new_norm}'
+
+
+def _write_lp_rows_csv(path: str, rows: List[LpIterationRow], logger) -> None:
+    if not isinstance(path, str) or len(path.strip()) == 0:
+        raise RuntimeError('csv path is empty')
+
+    path_norm = str(path).strip()
+    path_dir = os.path.dirname(path_norm)
+    if len(path_dir) > 0:
+        os.makedirs(path_dir, exist_ok=True)
+
+    with open(path_norm, 'w', encoding='utf-8', newline='') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=LP_CSV_HEADERS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({
+                'base_price': f'{float(row.base_price):.6f}',
+                'price_lower': f'{float(row.price_lower):.6f}',
+                'price_upper': f'{float(row.price_upper):.6f}',
+                'minted_base': f'{float(row.minted_base):.6f}',
+                'minted_quote': f'{float(row.minted_quote):.6f}',
+                'closed_base': f'{float(row.closed_base):.6f}',
+                'closed_quote': f'{float(row.closed_quote):.6f}',
+                'fees_quote': f'{float(row.fees_quote):.6f}',
+                'add_txids': str(row.add_txids),
+                'remove_txids': str(row.remove_txids),
+                'collect_txids': str(row.collect_txids),
+                'rebalance_txids': str(row.rebalance_txids),
+            })
+
+    logger.info(f'lp_rows_csv_written path={path_norm} rows={len(rows)}')
 
 
 def _topic_to_address(topic_hex: str) -> str:
@@ -1528,8 +1708,15 @@ def _build_report(
         start_block = 0
 
     pool_contract = w3.eth.contract(address=Web3.to_checksum_address(str(pool_address)), abi=POOL_ABI)
+    npm_contract = w3.eth.contract(address=Web3.to_checksum_address(str(npm_address)), abi=NPM_POSITIONS_ABI)
     rpc_hint = str(_w3_rpc_hint(w3))
     pool_price_by_block: Dict[int, float] = {}
+    position_bounds_by_token_id: Dict[int, Tuple[float, float]] = {}
+    lp_rows_raw: List[Dict[str, Any]] = []
+    pending_lp_row_idx_by_token: Dict[int, int] = {}
+    add_txids_by_token: Dict[int, str] = {}
+    rebalance_txids_by_token: Dict[int, str] = {}
+    pending_rebalance_txids: List[str] = []
     wallet_checksum = Web3.to_checksum_address(str(args.wallet_address))
 
     start_weth_raw = _erc20_balance_of_cached(
@@ -1595,6 +1782,12 @@ def _build_report(
             token_id = int(inc_move.token_id)
             if int(inc_move.liquidity) <= 0:
                 raise RuntimeError(f'increase move has non-positive liquidity: token_id={token_id} liquidity={inc_move.liquidity}')
+            add_txids_by_token[token_id] = _append_unique_id(
+                existing_ids=add_txids_by_token.get(token_id, ''),
+                new_id=str(tx.tx_hash),
+            )
+            if token_id not in rebalance_txids_by_token and len(pending_rebalance_txids) > 0:
+                rebalance_txids_by_token[token_id] = str(pending_rebalance_txids.pop(0))
 
             prev = LpPositionState(
                 liquidity_open=0,
@@ -1703,6 +1896,41 @@ def _build_report(
             sum_decrease_weth += float(dec_move.weth)
             sum_decrease_usdc += float(dec_move.usdc)
 
+            if token_id not in position_bounds_by_token_id:
+                position_bounds_by_token_id[token_id] = _load_position_price_bounds(
+                    npm_contract=npm_contract,
+                    token_id=int(token_id),
+                    token0=token0,
+                    token1=token1,
+                    usdc_token=usdc_token,
+                )
+            price_lower, price_upper = position_bounds_by_token_id[token_id]
+
+            base_price_for_row = float(valuation_price_at_decrease)
+            if abs(float(closed_principal_weth)) > 1e-18:
+                base_price_for_row = (
+                    float(closed_start_value_target_quote) - float(closed_principal_usdc)
+                ) / float(closed_principal_weth)
+            if float(base_price_for_row) <= 0.0:
+                base_price_for_row = float(valuation_price_at_decrease)
+
+            lp_rows_raw.append({
+                'base_price': float(base_price_for_row),
+                'price_lower': float(price_lower),
+                'price_upper': float(price_upper),
+                'minted_base': float(closed_principal_weth),
+                'minted_quote': float(closed_principal_usdc),
+                'closed_base': float(dec_move.weth),
+                'closed_quote': float(dec_move.usdc),
+                'fees_quote': 0.0,
+                'add_txids': str(add_txids_by_token.get(token_id, '')),
+                'remove_txids': str(tx.tx_hash),
+                'collect_txids': '',
+                'rebalance_txids': str(rebalance_txids_by_token.get(token_id, '')),
+                'close_price': float(valuation_price_at_decrease),
+            })
+            pending_lp_row_idx_by_token[token_id] = int(len(lp_rows_raw) - 1)
+
             next_liquidity_open = int(prev.liquidity_open) - int(dec_move.liquidity)
             next_principal_weth_open = float(prev.principal_weth_open) - float(closed_principal_weth)
             next_principal_usdc_open = float(prev.principal_usdc_open) - float(closed_principal_usdc)
@@ -1796,11 +2024,41 @@ def _build_report(
             sum_fee_weth += float(fee_weth)
             sum_fee_usdc += float(fee_usdc)
 
+            if token_id in pending_lp_row_idx_by_token:
+                row_idx = int(pending_lp_row_idx_by_token[token_id])
+                if int(row_idx) < 0 or int(row_idx) >= len(lp_rows_raw):
+                    raise RuntimeError(f'pending lp row idx out of range: token_id={token_id} row_idx={row_idx}')
+
+                close_price_for_fee = float(lp_rows_raw[row_idx]['close_price'])
+                if float(close_price_for_fee) <= 0.0:
+                    raise RuntimeError(
+                        f'close_price_for_fee <= 0 for token_id={token_id} row_idx={row_idx}: {close_price_for_fee}'
+                    )
+                fee_quote = _to_quote_pnl(
+                    base_delta=float(fee_weth),
+                    quote_delta=float(fee_usdc),
+                    base_price=float(close_price_for_fee),
+                )
+                lp_rows_raw[row_idx]['fees_quote'] = float(lp_rows_raw[row_idx]['fees_quote']) + float(fee_quote)
+                lp_rows_raw[row_idx]['collect_txids'] = _append_unique_id(
+                    existing_ids=str(lp_rows_raw[row_idx]['collect_txids']),
+                    new_id=str(tx.tx_hash),
+                )
+
+            if abs(float(pending_weth)) <= 1e-12 and abs(float(pending_usdc)) <= 1e-9:
+                if token_id in pending_lp_row_idx_by_token:
+                    del pending_lp_row_idx_by_token[token_id]
+                if token_id in add_txids_by_token:
+                    del add_txids_by_token[token_id]
+                if token_id in rebalance_txids_by_token:
+                    del rebalance_txids_by_token[token_id]
+
         has_swap = abs(float(tx.swap_weth)) > 1e-18 or abs(float(tx.swap_usdc)) > 1e-9
         if bool(has_swap):
             n_swaps += 1
             sum_swap_weth += float(tx.swap_weth)
             sum_swap_usdc += float(tx.swap_usdc)
+            pending_rebalance_txids.append(str(tx.tx_hash))
 
         if tx.kind in (TxKind.ADD, TxKind.REMOVE, TxKind.COLLECT, TxKind.SWAP):
             sum_gas_eth += float(tx.gas_eth)
@@ -1853,6 +2111,24 @@ def _build_report(
         (float(end_usdc) + float(end_weth) * float(current_price))
         - (float(start_usdc) + float(start_weth) * float(current_price))
     )
+    lp_iterations: List[LpIterationRow] = []
+    for raw_row in lp_rows_raw:
+        lp_iterations.append(
+            LpIterationRow(
+                base_price=float(raw_row['base_price']),
+                price_lower=float(raw_row['price_lower']),
+                price_upper=float(raw_row['price_upper']),
+                minted_base=float(raw_row['minted_base']),
+                minted_quote=float(raw_row['minted_quote']),
+                closed_base=float(raw_row['closed_base']),
+                closed_quote=float(raw_row['closed_quote']),
+                fees_quote=float(raw_row['fees_quote']),
+                add_txids=str(raw_row['add_txids']),
+                remove_txids=str(raw_row['remove_txids']),
+                collect_txids=str(raw_row['collect_txids']),
+                rebalance_txids=str(raw_row['rebalance_txids']),
+            )
+        )
 
     logger.info(
         f'build_report_done txs={len(txs)} swaps={n_swaps} '
@@ -1911,6 +2187,7 @@ def _build_report(
         transactions_total=len(txs),
         uniswap_swaps_total=int(n_swaps),
         analyzed_transactions=txs,
+        lp_iterations=lp_iterations,
     )
 
 
@@ -2082,6 +2359,10 @@ def main() -> None:
         f'report_ready txs={report.transactions_total} swaps={report.uniswap_swaps_total} '
         f'elapsed_sec={time.perf_counter() - t_build_start:.2f} total_elapsed_sec={time.perf_counter() - t_main_start:.2f}'
     )
+    lp_csv_path = str(args.lp_csv_path).strip()
+    if len(lp_csv_path) == 0:
+        lp_csv_path = _default_lp_csv_path()
+    _write_lp_rows_csv(path=str(lp_csv_path), rows=report.lp_iterations, logger=logger)
 
     print('=== WALLET HISTORY REPORT ===')
     print(f'Wallet: {report.wallet}')
@@ -2167,6 +2448,7 @@ def main() -> None:
     print('')
     print(f'PnL by components (USDC): {report.pnl.pnl_usdc_by_components:.8f}')
     print(f'PnL by balances   (USDC): {report.pnl_usdc_by_balances:.8f}')
+    print(f'LP CSV saved: {lp_csv_path}')
 
 
 if __name__ == '__main__':

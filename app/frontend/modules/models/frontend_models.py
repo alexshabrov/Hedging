@@ -695,7 +695,7 @@ class FrontendIterationDerivedPnl(StrictModel):
     run_id: str
     iteration_no: int
     is_finished: bool
-    valuation_price: float
+    close_price: float
     fees_quote: float
     il_quote: float
     cex_quote: float

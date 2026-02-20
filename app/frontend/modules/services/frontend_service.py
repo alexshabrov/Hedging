@@ -5,7 +5,6 @@ Version: 3.0
 """
 import re
 import time, uuid
-from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional
 
 from live.lib.logger import get_logger
@@ -982,6 +981,71 @@ class FrontendService:
             'apr_fees_il_gas_cex_pct': float(apr_fees_il_gas_cex_pct),
         })
 
+    def _resolve_lp_close_price(
+        self,
+        *,
+        price_lower: float,
+        price_upper: float,
+        minted_base: float,
+        minted_quote: float,
+        closed_base: float,
+        closed_quote: float,
+    ) -> float:
+        if float(price_lower) <= 0.0:
+            raise RuntimeError(f'FrontendService._resolve_lp_close_price: price_lower <= 0: {price_lower}')
+        if float(price_upper) <= 0.0:
+            raise RuntimeError(f'FrontendService._resolve_lp_close_price: price_upper <= 0: {price_upper}')
+        if float(price_lower) >= float(price_upper):
+            raise RuntimeError(
+                f'FrontendService._resolve_lp_close_price: price_lower >= price_upper: '
+                f'lower={price_lower} upper={price_upper}'
+            )
+
+        eps = 1e-12
+        base_delta = float(closed_base) - float(minted_base)
+        if float(base_delta) > float(eps):
+            return float(price_lower)
+        if float(base_delta) < -float(eps):
+            return float(price_upper)
+
+        quote_delta = float(closed_quote) - float(minted_quote)
+        if float(quote_delta) < -float(eps):
+            return float(price_lower)
+        if float(quote_delta) > float(eps):
+            return float(price_upper)
+
+        raise RuntimeError(
+            'FrontendService._resolve_lp_close_price: cannot infer close price from LP balances '
+            f'minted_base={minted_base} minted_quote={minted_quote} closed_base={closed_base} closed_quote={closed_quote}'
+        )
+
+    def _calc_lp_price_pnl_quote(
+        self,
+        *,
+        base_price: float,
+        price_lower: float,
+        price_upper: float,
+        minted_base: float,
+        minted_quote: float,
+        closed_base: float,
+        closed_quote: float,
+    ) -> tuple[float, float, float, float]:
+        if float(base_price) <= 0.0:
+            raise RuntimeError(f'FrontendService._calc_lp_price_pnl_quote: base_price <= 0: {base_price}')
+
+        close_price = self._resolve_lp_close_price(
+            price_lower=float(price_lower),
+            price_upper=float(price_upper),
+            minted_base=float(minted_base),
+            minted_quote=float(minted_quote),
+            closed_base=float(closed_base),
+            closed_quote=float(closed_quote),
+        )
+        volume_quote_open = float(minted_base) * float(base_price) + float(minted_quote)
+        volume_quote_close = float(closed_base) * float(close_price) + float(closed_quote)
+        price_pnl_quote = float(volume_quote_close) - float(volume_quote_open)
+        return float(close_price), float(volume_quote_open), float(volume_quote_close), float(price_pnl_quote)
+
     def _derive_iteration_components(self, item: FrontendIterationDoc) -> FrontendIterationDerivedPnl:
         if item is None:
             raise RuntimeError('FrontendService._derive_iteration_components: item is None')
@@ -991,95 +1055,41 @@ class FrontendService:
         stats = item.stats
         calc = stats.calc
         uniswap = stats.uniswap
-        live = stats.live
-
-        if live.last_snapshot is None:
-            raise RuntimeError('FrontendService._derive_iteration_components: stats.live.last_snapshot is None')
-        snap = live.last_snapshot
-
-        if snap.symbol_rule is None:
-            raise RuntimeError('FrontendService._derive_iteration_components: stats.live.last_snapshot.symbol_rule is None')
-
-        price_step_raw = str(snap.symbol_rule.price_step).strip()
-        if len(price_step_raw) == 0:
-            raise RuntimeError('FrontendService._derive_iteration_components: symbol_rule.price_step is empty')
-        try:
-            price_step = Decimal(price_step_raw)
-        except InvalidOperation as exc:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: invalid price_step: {price_step_raw}') from exc
-        if price_step <= 0:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: bad price_step: {price_step_raw}')
-
-        last_mid_price_units = int(snap.metrics.last_mid_price_units)
-        if int(last_mid_price_units) <= 0:
-            raise RuntimeError(
-                f'FrontendService._derive_iteration_components: bad last_mid_price_units: {last_mid_price_units}'
-            )
-        valuation_price = float(Decimal(int(last_mid_price_units)) * price_step)
-        if float(valuation_price) <= 0.0:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: bad valuation_price: {valuation_price}')
-
-        chases = snap.metrics.chases
-        open_filled_quote_units = 0
-        for chase in chases:
-            if str(chase.kind) == 'open' and bool(chase.ok) and int(chase.filled_quote_units) > 0:
-                open_filled_quote_units = int(chase.filled_quote_units)
-                break
-        if int(open_filled_quote_units) <= 0:
-            raise RuntimeError('FrontendService._derive_iteration_components: open_filled_quote_units not found')
 
         if uniswap.mint is None:
             raise RuntimeError('FrontendService._derive_iteration_components: uniswap.mint is None')
         if uniswap.decrease is None:
             raise RuntimeError('FrontendService._derive_iteration_components: uniswap.decrease is None')
-        if uniswap.collect is None:
-            raise RuntimeError('FrontendService._derive_iteration_components: uniswap.collect is None')
 
         mint = uniswap.mint
         decrease = uniswap.decrease
-        collect = uniswap.collect
 
         base_price = float(calc.base_price)
         if float(base_price) <= 0.0:
             raise RuntimeError(f'FrontendService._derive_iteration_components: bad base_price: {base_price}')
 
+        price_lower = float(calc.price_lower)
+        price_upper = float(calc.price_upper)
         mint_base = 0.0 if mint.amount_base is None else float(mint.amount_base)
         mint_quote = 0.0 if mint.amount_quote is None else float(mint.amount_quote)
         decrease_base = 0.0 if decrease.amount_base is None else float(decrease.amount_base)
         decrease_quote = 0.0 if decrease.amount_quote is None else float(decrease.amount_quote)
-        collect_base = 0.0 if collect.amount_base is None else float(collect.amount_base)
-        collect_quote = 0.0 if collect.amount_quote is None else float(collect.amount_quote)
 
-        hedge_quote = float(calc.hedge_quote)
-        quote_per_cex_unit = float(hedge_quote) / float(open_filled_quote_units)
-        if float(quote_per_cex_unit) <= 0.0:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: bad quote_per_cex_unit: {quote_per_cex_unit}')
-        cex_units = int(snap.metrics.realized_pnl_quote_units) + int(snap.metrics.unrealized_pnl_quote_units)
-        cex_quote = float(cex_units) * float(quote_per_cex_unit)
-
-        start_value_target = float(mint_base) * float(base_price) + float(mint_quote)
-        if float(start_value_target) <= 0.0:
-            raise RuntimeError(f'FrontendService._derive_iteration_components: bad start_value_target: {start_value_target}')
-
-        step_exit_value = float(decrease_base) * float(valuation_price) + float(decrease_quote)
-        il_quote = float(step_exit_value) - float(start_value_target)
-
-        fees_quote = (float(collect_quote) - float(decrease_quote)) + (
-            (float(collect_base) - float(decrease_base)) * float(valuation_price)
+        close_price, _volume_quote_open, _volume_quote_close, price_pnl_quote = self._calc_lp_price_pnl_quote(
+            base_price=float(base_price),
+            price_lower=float(price_lower),
+            price_upper=float(price_upper),
+            minted_base=float(mint_base),
+            minted_quote=float(mint_quote),
+            closed_base=float(decrease_base),
+            closed_quote=float(decrease_quote),
         )
 
-        gas_paid_eth = (
-            (0.0 if mint.gas_cost_eth is None else float(mint.gas_cost_eth))
-            + (0.0 if decrease.gas_cost_eth is None else float(decrease.gas_cost_eth))
-            + (0.0 if collect.gas_cost_eth is None else float(collect.gas_cost_eth))
-        )
-        gas_paid_quote = float(gas_paid_eth) * float(valuation_price)
+        fees_quote = float(item.pnl.fees_received_quote)
+        cex_quote = float(item.pnl.cex_pnl_quote)
+        costs_pnl_quote = -float(item.costs_quote)
 
-        swap_cost_quote = float(item.swap_cost_quote)
-        costs_abs_quote = float(gas_paid_quote) + float(swap_cost_quote)
-        costs_pnl_quote = -float(costs_abs_quote)
-
-        pnl_without_hedge_quote = float(il_quote) + float(fees_quote) + float(costs_pnl_quote)
+        pnl_without_hedge_quote = float(price_pnl_quote) + float(fees_quote) + float(costs_pnl_quote)
         pnl_with_hedge_quote = float(pnl_without_hedge_quote) + float(cex_quote)
 
         mint_tx_timestamp_ms = int(uniswap.mint_tx_timestamp_ms)
@@ -1095,9 +1105,9 @@ class FrontendService:
             run_id=str(item.run_id),
             iteration_no=int(item.iteration_no),
             is_finished=str(item.status) == 'finished',
-            valuation_price=float(valuation_price),
+            close_price=float(close_price),
             fees_quote=float(fees_quote),
-            il_quote=float(il_quote),
+            il_quote=float(price_pnl_quote),
             cex_quote=float(cex_quote),
             costs_pnl_quote=float(costs_pnl_quote),
             pnl_without_hedge_quote=float(pnl_without_hedge_quote),

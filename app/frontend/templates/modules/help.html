@@ -136,21 +136,20 @@
                                     <td>DEX price PnL</td>
                                     <td>
                                         <code>
-                                            start_value_target = mint_base * base_price + mint_quote
-                                            step_exit_value = decrease_base * valuation_price + decrease_quote
-                                            dex_realized_il_quote = step_exit_value - start_value_target
+                                            close_price = infer_from_lp_balances(minted_base, minted_quote, closed_base, closed_quote, price_lower, price_upper)
+                                            volume_quote_open = minted_base * base_price + minted_quote
+                                            volume_quote_close = closed_base * close_price + closed_quote
+                                            price_pnl_quote = volume_quote_close - volume_quote_open
                                         </code>
                                     </td>
-                                    <td>Реализованный IL из raw полей итерации (как value at exit - start value target).</td>
+                                    <td>LP price PnL рассчитывается только из полей LP блока без snapshot valuation.</td>
                                 </tr>
                                 <tr>
                                     <td>Fees received quote</td>
                                     <td>
-                                        <code>
-                                            (collect_quote - decrease_quote) + (collect_base - decrease_base) * valuation_price
-                                        </code>
+                                        <code>fees_received_quote = fees_quote</code>
                                     </td>
-                                    <td>Чистые LP-комиссии сверх возвращённого principal.</td>
+                                    <td>Берётся как входное поле LP блока.</td>
                                 </tr>
                                 <tr>
                                     <td>CEX PnL quote</td>
@@ -163,7 +162,7 @@
                                 </tr>
                                 <tr>
                                     <td>PnL without hedge</td>
-                                    <td><code>pnl_without_hedge_quote = dex_realized_il_quote + fees_received_quote + costs_quote</code></td>
+                                    <td><code>pnl_without_hedge_quote = price_pnl_quote + fees_received_quote + costs_quote</code></td>
                                     <td>Итог итерации без учёта результата CEX-хеджа.</td>
                                 </tr>
                                 <tr>
@@ -285,7 +284,7 @@
                                 </tr>
                                 <tr>
                                     <td>PnL: fees + il</td>
-                                    <td><code>fees_received_quote + dex_realized_il_quote</code></td>
+                                    <td><code>fees_received_quote + price_pnl_quote</code></td>
                                 </tr>
                                 <tr>
                                     <td>PnL: fees + il + gas</td>
@@ -329,7 +328,7 @@
                                 </tr>
                                 <tr>
                                     <td>IL PnL quote</td>
-                                    <td><code>dex_realized_il_quote</code></td>
+                                    <td><code>price_pnl_quote</code></td>
                                     <td>Знак как у PnL: отрицательное значение = IL-убыток, положительное = IL-прибыль.</td>
                                 </tr>
                             </tbody>
