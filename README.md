@@ -11,7 +11,7 @@
 - оффлайн-исследований и бэктестов логики лимитного исполнения/чейза на исторических трейдах Binance UM Futures;
 - live-исполнения и хеджирования на Binance (`live` пакет);
 - работы с DEX (Uniswap V3 + CowSwap) в реальном времени (`dex` пакет);
-- объединения CEX+DEX в единый раннер `app/hedger.py`, который:
+- объединения CEX+DEX в единый раннер `app/backend/hedger_cli.py`, который:
   - открывает LP-позицию в Uniswap V3,
   - ведет хедж через live-движок на Binance,
   - закрывает ликвидность,
@@ -29,7 +29,7 @@
 - `app/dex` — runtime для DEX: realtime swap events, работа с Uniswap V3 контрактами, CowSwap свопы;
 - `app/modules/hedger_class.py` — оркестратор полного цикла CEX+DEX;
 - `app/models/hedger_models.py` — итоговые модели статистики раннера;
-- `app/hedger.py` — CLI-энтрипойнт полного хедж-сценария;
+- `app/backend/hedger_cli.py` — CLI-энтрипойнт полного хедж-сценария;
 - `app/uniswapv3.ipynb` — исследовательский ноутбук по Uniswap V3.
 
 ---
@@ -49,6 +49,24 @@ cd /hedging/app
 ```
 
 Данные монтируются в `/_data` (см. `docker-compose.yaml`).
+
+Для web-доступа добавлены `nginx` + `certbot`:
+
+- `nginx` слушает `80/443` и проксирует только frontend в `hedging:8081`.
+- `certbot` хранит сертификаты в `/_certbot/conf` и webroot challenge в `/_certbot/www`.
+
+Первичная выдача сертификата и включение HTTPS:
+
+```bash
+chmod +x add_domain.sh renew_all.sh
+./add_domain.sh hedging.example.com
+```
+
+Периодическое обновление сертификатов вручную:
+
+```bash
+./renew_all.sh
+```
 
 ### Вариант B: локальный Python
 
@@ -195,7 +213,7 @@ python -m pip install -e app/dex
 
 ---
 
-## `app/hedger.py`
+## `app/backend/hedger_cli.py`
 
 CLI точка входа full-run.
 
@@ -375,7 +393,7 @@ CLI точка входа full-run.
 
 ## 5.6 Итоговая модель full-run (`HedgerStats`)
 
-Выход `app/hedger.py`:
+Выход `app/backend/hedger_cli.py`:
 
 ```json
 {
@@ -385,7 +403,7 @@ CLI точка входа full-run.
     "price_lower": 1900.0,
     "price_upper": 2124.68,
     "total_quote": 1000.0,
-    "cex_ratio": 0.5,
+    "cex_ratio": 0.255,
     "trigger_offset_pct_x10000": 558,
     "target_offset_pct_x10000": 558,
     "hedge_quote": 500.0
@@ -506,7 +524,7 @@ python -m dex.examples.liquidity_example \
   --fee-pct=0.05
 ```
 
-## 7.5 Full CEX+DEX runner (`hedger.py`)
+## 7.5 Full CEX+DEX runner (`backend/hedger_cli.py`)
 
 ```bash
 export BINANCE_KEY="..."
@@ -514,7 +532,7 @@ export BINANCE_SECRET="..."
 export PRIVATE_KEY="..."
 export WALLET_ADDRESS="0x..."
 
-python app/hedger.py \
+python app/backend/hedger_cli.py \
   --symbol SOLUSDC \
   --rpc-url https://arbitrum-mainnet.infura.io/v3/<KEY> \
   --network arbitrum \
@@ -523,11 +541,46 @@ python app/hedger.py \
   --price-lower 1900 \
   --price-upper 2100 \
   --total-quote 1000 \
-  --cex-ratio 0.5 \
+  --cex-ratio 0.255 \
   --mongo-uri mongodb://hedging_mongo:27017 \
   --mongo-db hedging \
   --mongo-collection hedge_runs
 ```
+
+## 7.6 Backend internal service (`app/backend/backend_service.py`)
+
+```bash
+export BINANCE_KEY="..."
+export BINANCE_SECRET="..."
+export PRIVATE_KEY="..."
+export WALLET_ADDRESS="0x..."  # optional
+
+python app/backend/backend_service.py
+```
+
+По умолчанию сервис слушает `0.0.0.0:8080`.
+
+## 7.7 Frontend admin service (`app/frontend/app.py`)
+
+```bash
+export FRONT_SECRET_KEY="..."
+export FRONT_ADMIN_PASSWORD="..."
+export FRONT_BACKEND_URL="http://hedging:8080"
+export RPC_KEY="..."
+export MONGO_URI="mongodb://hedging_mongo:27017"
+export MONGO_DB="hedging"
+export MONGO_COLLECTION="hedge_runs"
+export TICK_MS="5"
+export GTX_COOLDOWN_MS="5"
+export ENTRANCE_TIMEOUT_MS="60000"
+export COWSWAP_API_TIMEOUT_SEC="10"
+export COWSWAP_WAIT_TIMEOUT_SEC="300"
+export COWSWAP_POLL_INTERVAL_SEC="3"
+
+python app/frontend/app.py
+```
+
+По умолчанию сервис слушает `0.0.0.0:8081`.
 
 ---
 

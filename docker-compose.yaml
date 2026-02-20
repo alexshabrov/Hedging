@@ -6,6 +6,24 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      - FRONT_BACKEND_URL=${FRONT_BACKEND_URL:-http://127.0.0.1:8080}
+      - MONGO_URI=${MONGO_URI:-mongodb://hedging_mongo:27017}
+      - MONGO_DB=${MONGO_DB:-hedging}
+      - MONGO_COLLECTION=${MONGO_COLLECTION:-hedge_runs}
+      - TICK_MS=${TICK_MS:-5}
+      - GTX_COOLDOWN_MS=${GTX_COOLDOWN_MS:-5}
+      - ENTRANCE_TIMEOUT_MS=${ENTRANCE_TIMEOUT_MS:-60000}
+      - COWSWAP_API_TIMEOUT_SEC=${COWSWAP_API_TIMEOUT_SEC:-10}
+      - COWSWAP_WAIT_TIMEOUT_SEC=${COWSWAP_WAIT_TIMEOUT_SEC:-300}
+      - COWSWAP_POLL_INTERVAL_SEC=${COWSWAP_POLL_INTERVAL_SEC:-3}
+      - BINANCE_KEY=${BINANCE_KEY:-}
+      - BINANCE_SECRET=${BINANCE_SECRET:-}
+      - PRIVATE_KEY=${PRIVATE_KEY:-}
+      - FRONT_SECRET_KEY=${FRONT_SECRET_KEY:-}
+      - FRONT_ADMIN_PASSWORD=${FRONT_ADMIN_PASSWORD:-}
+      - RPC_KEY=${RPC_KEY:-}
+      - FRONT_SESSION_COOKIE_DOMAIN=${FRONT_SESSION_COOKIE_DOMAIN:-}
     ########
     networks:
       - nginx-common
@@ -14,9 +32,36 @@ services:
     image: mongo
     volumes:
       - /_db/hedging_mongo:/data/db
+    logging:
+      driver: "none"
     networks:
       - nginx-common
     command: mongod # --replSet rs0 --bind_ip_all
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/site.conf:/etc/nginx/conf.d/default.conf:ro
+      - /_certbot/conf:/etc/letsencrypt
+      - ./nginx/options-ssl-nginx.conf:/etc/letsencrypt/options-ssl-nginx.conf:ro
+      - ./nginx/ssl-dhparams.pem:/etc/letsencrypt/ssl-dhparams.pem:ro
+      - /_certbot/www:/var/www/certbot
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      - hedging
+    networks:
+      - nginx-common
+
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - /_certbot/conf:/etc/letsencrypt
+      - /_certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - nginx-common
 
 networks:
   nginx-common:

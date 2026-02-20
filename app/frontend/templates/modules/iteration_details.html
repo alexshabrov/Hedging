@@ -1,0 +1,154 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Iteration {{ details.row.iteration_no }}</div>
+                    <div class="card-body">
+                        <a href="/runs/{{ details.row.run_id }}" class="btn btn-secondary btn-sm">Back to run</a>
+                        <hr>
+
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>ID</th><td>{{ details.row.id }}</td></tr>
+                                <tr><th>Run ID</th><td>{{ details.row.run_id }}</td></tr>
+                                <tr>
+                                    <th>Token</th>
+                                    <td>
+                                        {% if details.row.token_id is not none %}
+                                            {{ details.row.token_id }}
+                                            {% if details.row.pool_url %}<a href="{{ details.row.pool_url }}" target="_blank" rel="noopener noreferrer" class="ml-1">Uniswap</a>{% endif %}
+                                            {% if details.row.revert_link %}<a href="{{ details.row.revert_link }}" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>{% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr><th>Status</th><td>{% with status=details.row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
+                                <tr><th>Close reason</th><td>{{ details.row.close_reason }}</td></tr>
+                                <tr><th>Close trigger side</th><td>{{ details.row.close_trigger_side if details.row.close_trigger_side else '-' }}</td></tr>
+                                <tr><th>Started</th><td>{{ utc_ts(details.row.started_at_ms) }}</td></tr>
+                                <tr><th>Finished</th><td>{{ utc_ts(details.row.finished_at_ms) }}</td></tr>
+                                <tr><th>Runtime sec</th><td>{{ '%.4f'|format(details.row.runtime_sec) }}</td></tr>
+                                <tr><th>Total quote</th><td>{{ '%.6f'|format(details.row.total_quote) }}</td></tr>
+                                <tr><th>PnL with hedge</th><td>{{ '%.6f'|format(details.row.pnl_with_hedge_quote) }}</td></tr>
+                                <tr><th>PnL without hedge</th><td>{{ '%.6f'|format(details.row.pnl_without_hedge_quote) }}</td></tr>
+                                <tr><th>APR: fees (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_pct) }}</td></tr>
+                                <tr><th>APR: fees + il (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_il_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_il_gas_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas + cex (%)</th><td>{{ '%.6f'|format(details.row.apr_fees_il_gas_cex_pct) }}</td></tr>
+                                <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.row.fees_quote) }}</td></tr>
+                                <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.row.price_pnl_quote) }}</td></tr>
+                                <tr><th>Hedge PnL quote</th><td>{{ '%.6f'|format(details.row.hedge_pnl_quote) }}</td></tr>
+                                <tr><th>Gas/Costs PnL quote</th><td>{{ '%.6f'|format(details.row.costs_quote) }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5 style="margin-top: 20px;">LP block</h5>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Base price</th><td>{{ '%.6f'|format(details.lp.base_price) }}</td></tr>
+                                <tr><th>Price lower</th><td>{{ '%.6f'|format(details.lp.price_lower) }}</td></tr>
+                                <tr><th>Price upper</th><td>{{ '%.6f'|format(details.lp.price_upper) }}</td></tr>
+                                <tr><th>Minted base</th><td>{{ '%.6f'|format(details.lp.minted_base) }}</td></tr>
+                                <tr><th>Minted quote</th><td>{{ '%.6f'|format(details.lp.minted_quote) }}</td></tr>
+                                <tr><th>Closed base</th><td>{{ '%.6f'|format(details.lp.closed_base) }}</td></tr>
+                                <tr><th>Closed quote</th><td>{{ '%.6f'|format(details.lp.closed_quote) }}</td></tr>
+                                <tr><th>Fees quote</th><td>{{ '%.6f'|format(details.lp.fees_quote) }}</td></tr>
+                                <tr><th>Price PnL quote</th><td>{{ '%.6f'|format(details.lp.price_pnl_quote) }}</td></tr>
+                                <tr><th>IL PnL quote</th><td>{{ '%.6f'|format(details.lp.impermanent_loss_quote) }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5 style="margin-top: 20px;">Hedge block</h5>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Activated</th><td>{{ details.hedge.activated }}</td></tr>
+                                <tr><th>Activation price</th><td>{{ details.hedge.activation_price }}</td></tr>
+                                <tr><th>Hedge quote</th><td>{{ '%.6f'|format(details.hedge.hedge_quote) }}</td></tr>
+                                <tr><th>Opened leg</th><td>{{ details.hedge.opened_leg }}</td></tr>
+                                <tr><th>Opened base units</th><td>{{ details.hedge.opened_base_units }}</td></tr>
+                                <tr><th>CEX PnL quote</th><td>{{ '%.6f'|format(details.hedge.cex_pnl_quote) }}</td></tr>
+                                <tr><th>Realized PnL units</th><td>{{ details.hedge.realized_pnl_quote_units }}</td></tr>
+                                <tr><th>Unrealized PnL units</th><td>{{ details.hedge.unrealized_pnl_quote_units }}</td></tr>
+                                <tr><th>Opened (UTC)</th><td>{{ utc_ts(details.hedge.opened_ms) }}</td></tr>
+                                <tr><th>Closed (UTC)</th><td>{{ utc_ts(details.hedge.closed_ms) }}</td></tr>
+                                <tr><th>Close reason</th><td>{{ details.hedge.close_reason }}</td></tr>
+                                <tr><th>Close trigger side</th><td>{{ details.hedge.close_trigger_side if details.hedge.close_trigger_side else '-' }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5 style="margin-top: 20px;">Rebalance block</h5>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Swap ok</th><td>{{ details.rebalance.swap_ok }}</td></tr>
+                                <tr><th>Swap error</th><td>{{ details.rebalance.swap_error }}</td></tr>
+                                <tr><th>Sell amount</th><td>{{ details.rebalance.sell_amount }}</td></tr>
+                                <tr><th>Buy amount</th><td>{{ details.rebalance.buy_amount }}</td></tr>
+                                <tr><th>Execution fee</th><td>{{ details.rebalance.execution_fee }}</td></tr>
+                                <tr><th>Fee token</th><td>{{ details.rebalance.fee_token }}</td></tr>
+                                <tr><th>Elapsed sec</th><td>{{ details.rebalance.elapsed_sec }}</td></tr>
+                                <tr><th>Order status</th><td>{% with status=details.rebalance.order_status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
+                                <tr><th>Order url</th><td>{{ details.rebalance.order_url }}</td></tr>
+                                <tr><th>Swap cost PnL quote</th><td>{{ '%.6f'|format(details.rebalance.swap_cost_quote) }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h5 style="margin-top: 20px;">Hedge chases</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Kind</th>
+                                    <th>Started</th>
+                                    <th>Finished</th>
+                                    <th>Side</th>
+                                    <th>Filled base</th>
+                                    <th>Filled quote</th>
+                                    <th>CEX quote balance units</th>
+                                    <th>CEX PnL quote</th>
+                                    <th>Avg price units</th>
+                                    <th>Slippage x10000</th>
+                                    <th>GTX violations</th>
+                                    <th>Exchange errors</th>
+                                    <th>OK</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for chase in details.hedge_chases|sort(attribute='started_ms', reverse=True) %}
+                                    <tr{% if chase.is_final_pnl %} class="table-success"{% endif %}>
+                                        <td>{{ chase.kind }}</td>
+                                        <td>{{ utc_ts(chase.started_ms) }}</td>
+                                        <td>{{ utc_ts(chase.finished_ms) }}</td>
+                                        <td>{{ chase.order_side }}</td>
+                                        <td>{{ chase.filled_base_units }}</td>
+                                        <td>{{ chase.filled_quote_units }}</td>
+                                        <td>{{ chase.cex_quote_balance_units }}</td>
+                                        <td>
+                                            {% if chase.is_final_pnl %}
+                                                <span class="font-weight-bold">{{ '%.6f'|format(chase.cex_pnl_quote) }}</span>
+                                                <span class="badge badge-success ml-1">FINAL</span>
+                                            {% else %}
+                                                {{ '%.6f'|format(chase.cex_pnl_quote) }}
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ chase.avg_price_units }}</td>
+                                        <td>{{ chase.slippage_pct_x10000 }}</td>
+                                        <td>{{ chase.gtx_violations }}</td>
+                                        <td>{{ chase.exchange_errors }}</td>
+                                        <td>{{ chase.ok }}</td>
+                                        <td>{{ chase.error }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}

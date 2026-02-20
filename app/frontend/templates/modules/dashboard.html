@@ -1,0 +1,44 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-info">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">System Dashboard</div>
+                    <div class="card-body">
+                        <table class="table table-bordered table-sm">
+                            <tbody>
+                                <tr><th>Active runs</th><td>{{ dashboard.active_runs }}</td></tr>
+                                <tr><th>Finished iterations</th><td>{{ dashboard.finished_iterations }}</td></tr>
+                                <tr><th>Close trigger: upper</th><td>{{ dashboard.close_trigger_upper_count }} ({{ '%.2f'|format(dashboard.close_trigger_upper_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: lower</th><td>{{ dashboard.close_trigger_lower_count }} ({{ '%.2f'|format(dashboard.close_trigger_lower_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: total</th><td>{{ dashboard.close_trigger_total_count }}</td></tr>
+                                <tr><th>Total PnL with hedge</th><td>{{ '%.6f'|format(dashboard.total_pnl_with_hedge_quote) }}</td></tr>
+                                <tr><th>Total PnL without hedge</th><td>{{ '%.6f'|format(dashboard.total_pnl_without_hedge_quote) }}</td></tr>
+                                <tr><th>Total gas/costs PnL quote</th><td>{{ '%.6f'|format(dashboard.total_costs_quote) }}</td></tr>
+                                <tr><th>APR with hedge (%)</th><td>{{ '%.4f'|format(dashboard.apr_with_hedge_pct) }}</td></tr>
+                                <tr><th>APR without hedge (%)</th><td>{{ '%.4f'|format(dashboard.apr_without_hedge_pct) }}</td></tr>
+                                <tr><th>Average iteration lifetime (sec)</th><td>{{ '%.2f'|format(dashboard.avg_iteration_lifetime_sec) }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}

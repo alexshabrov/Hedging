@@ -1,0 +1,175 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper" id="run-details-root" data-run-id="{{ details.position.run_id }}">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-info">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Run {{ details.position.run_id }}</div>
+                    <div class="card-body">
+                        <form method="POST" action="/runs/{{ details.position.run_id }}/stop" onsubmit="return confirm('Stop this run?');" style="display:inline;">
+                            <span id="run-stop-wrap" {% if details.position.status not in ['initialized', 'running', 'stopping'] %}style="display:none;"{% endif %}>
+                                <button type="submit" class="btn btn-danger btn-sm mr-1">Stop run</button>
+                            </span>
+                        </form>
+                        <form method="POST" action="/runs/{{ details.position.run_id }}/collect" onsubmit="return confirm('Collect fees to wallet for this failed run?');" style="display:inline;">
+                            <span id="run-collect-wrap" {% if details.position.status != 'failed' or details.position.token_id is none %}style="display:none;"{% endif %}>
+                                <button type="submit" class="btn btn-warning btn-sm mr-1">Collect</button>
+                            </span>
+                        </form>
+                        <a href="/positions" class="btn btn-secondary btn-sm">Back to positions</a>
+
+                        <hr>
+
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Status</th><td id="run-status">{% with status=details.position.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td></tr>
+                                <tr>
+                                    <th>Token ID</th>
+                                    <td>
+                                        <span id="run-token-id">{{ details.position.token_id if details.position.token_id is not none else '-' }}</span>
+                                        <span id="run-token-links">
+                                            {% if details.position.pool_url %}<a href="{{ details.position.pool_url }}" target="_blank" rel="noopener noreferrer" class="ml-1">Uniswap</a>{% endif %}
+                                            {% if details.position.revert_link %}<a href="{{ details.position.revert_link }}" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>{% endif %}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr><th>Symbol</th><td id="run-symbol">{{ details.position.symbol }}</td></tr>
+                                <tr><th>DEX only</th><td id="run-dex-only">{% if details.position.dex_only %}yes{% else %}no{% endif %}</td></tr>
+                                <tr><th>Mock source</th><td id="run-mock-source">{{ details.position.mock_realtime_source }}</td></tr>
+                                <tr><th>Started (UTC)</th><td id="run-started">{{ utc_ts(details.position.first_started_at_ms) }}</td></tr>
+                                <tr><th>Runtime</th><td id="run-runtime">{{ details.position.runtime_dhm }}</td></tr>
+                                <tr><th>Total quote</th><td id="run-total-quote">{{ '%.4f'|format(details.position.total_quote) }}</td></tr>
+                                <tr><th>Close trigger: upper</th><td id="run-close-upper">{{ details.position.close_trigger_upper_count }} ({{ '%.2f'|format(details.position.close_trigger_upper_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: lower</th><td id="run-close-lower">{{ details.position.close_trigger_lower_count }} ({{ '%.2f'|format(details.position.close_trigger_lower_pct) }}%)</td></tr>
+                                <tr><th>Close trigger: total</th><td id="run-close-total">{{ details.position.close_trigger_total_count }}</td></tr>
+                                <tr><th>PnL: fees</th><td id="run-pnl-fees">{{ '%.4f'|format(details.position.pnl_fees_quote) }}</td></tr>
+                                <tr><th>PnL: fees + il</th><td id="run-pnl-fees-il">{{ '%.4f'|format(details.position.pnl_fees_il_quote) }}</td></tr>
+                                <tr><th>PnL: fees + il + gas</th><td id="run-pnl-fees-il-gas">{{ '%.4f'|format(details.position.pnl_fees_il_gas_quote) }}</td></tr>
+                                <tr><th>PnL: fees + il + gas + cex</th><td id="run-pnl-fees-il-gas-cex">{{ '%.4f'|format(details.position.pnl_fees_il_gas_cex_quote) }}</td></tr>
+                                <tr><th>APR: fees %</th><td id="run-apr-fees">{{ '%.4f'|format(details.position.apr_fees_pct) }}</td></tr>
+                                <tr><th>APR: fees + il %</th><td id="run-apr-fees-il">{{ '%.4f'|format(details.position.apr_fees_il_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas %</th><td id="run-apr-fees-il-gas">{{ '%.4f'|format(details.position.apr_fees_il_gas_pct) }}</td></tr>
+                                <tr><th>APR: fees + il + gas + cex %</th><td id="run-apr-fees-il-gas-cex">{{ '%.4f'|format(details.position.apr_fees_il_gas_cex_pct) }}</td></tr>
+                            </tbody>
+                        </table>
+
+                        <div id="failure-block" {% if not details.failure_reason and not details.failure_error_raw %}style="display:none;"{% endif %}>
+                        <h6 class="mt-3 text-danger">Failure reason</h6>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr id="failure-reason-row" {% if not details.failure_reason %}style="display:none;"{% endif %}><th>Detailed explanation</th><td><pre id="failure-reason" style="margin:0; white-space:pre-wrap;">{{ details.failure_reason }}</pre></td></tr>
+                                <tr id="failure-raw-row" {% if not details.failure_error_raw %}style="display:none;"{% endif %}><th>Backend error (raw)</th><td><pre id="failure-raw" style="margin:0; white-space:pre-wrap;">{{ details.failure_error_raw }}</pre></td></tr>
+                            </tbody>
+                        </table>
+                        </div>
+
+                        <h6 class="mt-3">Run config</h6>
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                <tr><th>Template ID</th><td>{{ details.template_id if details.template_id else '-' }}</td></tr>
+                                <tr><th>Network</th><td>{{ details.config.network }}</td></tr>
+                                <tr><th>Pool</th><td>{{ details.config.pool_address }}</td></tr>
+                                <tr><th>Fee %</th><td>{{ details.config.fee_pct }}</td></tr>
+                                <tr><th>CEX ratio</th><td>{{ details.config.cex_ratio }}</td></tr>
+                                <tr><th>DEX only</th><td>{% if details.config.dex_only %}yes{% else %}no{% endif %}</td></tr>
+                                <tr><th>Mock source</th><td>{{ details.config.mock_realtime_source }}</td></tr>
+                                <tr><th>DEX WS URL</th><td>{{ details.config.dex_ws_url }}</td></tr>
+                                <tr><th>Trigger mode</th><td>{{ details.config.trigger_mode }}</td></tr>
+                                <tr><th>Trigger %</th><td>{{ details.config.trigger_pct }}</td></tr>
+                                <tr><th>Trigger units</th><td>{{ details.config.trigger_units }}</td></tr>
+                                <tr><th>Price lower %</th><td>{{ details.config.price_lower_pct }}</td></tr>
+                                <tr><th>Price upper %</th><td>{{ details.config.price_upper_pct }}</td></tr>
+                                <tr><th>Price lower</th><td>{{ details.config.price_lower }}</td></tr>
+                                <tr><th>Price upper</th><td>{{ details.config.price_upper }}</td></tr>
+                                <tr><th>Total quote</th><td>{{ details.config.total_quote }}</td></tr>
+                                <tr><th>Tick (ms)</th><td>{{ details.config.tick_ms }}</td></tr>
+                                <tr><th>GTX cooldown (ms)</th><td>{{ details.config.gtx_cooldown_ms }}</td></tr>
+                                <tr><th>Entrance timeout (ms)</th><td>{{ details.config.entrance_timeout_ms }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Iterations</div>
+                    <div class="card-body p-0">
+                        <table class="table table-bordered table-hover table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>ID</th>
+                                    <th>Token</th>
+                                    <th>Status</th>
+                                    <th>Start</th>
+                                    <th>Finish</th>
+                                    <th>Runtime sec</th>
+                                    <th>Close reason</th>
+                                    <th>Close trigger side</th>
+                                    <th>PnL: fees</th>
+                                    <th>PnL: fees + il</th>
+                                    <th>PnL: fees + il + gas</th>
+                                    <th>PnL: fees + il + gas + cex</th>
+                                    <th>APR: fees %</th>
+                                    <th>APR: fees + il %</th>
+                                    <th>APR: fees + il + gas %</th>
+                                    <th>APR: fees + il + gas + cex %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="iterations-body">
+                                {% for row in details.iterations %}
+                                    <tr>
+                                        <td>{{ row.iteration_no }}</td>
+                                        <td><a href="/iterations/{{ row.id }}">{{ row.id }}</a></td>
+                                        <td>
+                                            {% if row.token_id is not none %}
+                                                {{ row.token_id }}
+                                                {% if row.revert_link %}<a href="{{ row.revert_link }}" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>{% endif %}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
+                                        <td>{{ utc_ts(row.started_at_ms) }}</td>
+                                        <td>{{ utc_ts(row.finished_at_ms) }}</td>
+                                        <td>{{ '%.2f'|format(row.runtime_sec) }}</td>
+                                        <td>{{ row.close_reason }}</td>
+                                        <td>{{ row.close_trigger_side if row.close_trigger_side else '-' }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_gas_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_gas_cex_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_gas_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_gas_cex_pct) }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/run_details.js') }}"></script>
+
+{% include '_footer.html' %}

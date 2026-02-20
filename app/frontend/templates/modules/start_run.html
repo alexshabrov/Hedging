@@ -1,0 +1,253 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-info">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-sm-12 col-lg-6">
+                <div class="card">
+                    <div class="card-header">Create run template</div>
+                    <div class="card-body">
+                        <form method="POST" action="/runs/start">
+                            <input type="hidden" name="action" value="create_template">
+
+                            <div class="form-row">
+                                <div class="form-group col-md-3">
+                                    <label>network</label>
+                                    <select class="form-control" name="network" required>
+                                        {% for item in networks %}
+                                            <option value="{{ item.key }}">{{ item.key }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="form-group col-md-3">
+                                    <label>symbol</label>
+                                    <input class="form-control" name="symbol" value="ETHUSDC" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>pool_address</label>
+                                    <input class="form-control" name="pool_address" required>
+                                </div>
+                                <div class="form-group col-md-2">
+                                    <label>fee_pct</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="fee_pct" value="0.05" required>
+                                </div>
+                                <div class="form-group col-md-2">
+                                    <label>cex_ratio</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="cex_ratio" value="0.255" required>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group col-md-4">
+                                    <label>trigger_mode</label>
+                                    <select class="form-control" name="trigger_mode">
+                                        <option value="pct">pct</option>
+                                        <option value="units">units</option>
+                                    </select>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>trigger_pct</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="trigger_pct" value="0.05" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>trigger_units</label>
+                                    <input type="number" step="1" min="0" class="form-control" name="trigger_units" value="0" required>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Create template</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-sm-12 col-lg-6">
+                <div class="card">
+                    <div class="card-header">Start run from template</div>
+                    <div class="card-body">
+                        <form method="POST" action="/runs/start" id="start-run-form">
+                            <input type="hidden" name="action" value="start_from_template">
+
+                            <div class="form-row">
+                                <div class="form-group col-md-12">
+                                    <label>template_id</label>
+                                    <select class="form-control" name="template_id" required>
+                                        {% for item in templates %}
+                                            <option value="{{ item.template_id }}">
+                                                {{ item.template_id }} | {{ item.network }} | {{ item.symbol }} | {{ item.pool_address }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group col-md-4">
+                                    <label>total_quote</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="total_quote" value="1000" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>price_lower_pct</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="price_lower_pct" value="5" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>price_upper_pct</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="price_upper_pct" value="5" required>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group col-md-6">
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" name="dex_only" value="1" id="dex-only-checkbox">
+                                        <label class="form-check-label" for="dex-only-checkbox">DEX only</label>
+                                    </div>
+                                </div>
+                                <div class="form-group col-md-6">
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" name="mock_source_dex" value="1" id="mock-source-dex-checkbox">
+                                        <label class="form-check-label" for="mock-source-dex-checkbox">MockHedge source: DEX swaps realtime</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Start</button>
+                            <a href="/positions" class="btn btn-secondary">Cancel</a>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if edit_template %}
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Edit template</div>
+                    <div class="card-body">
+                        <form method="POST" action="/runs/start">
+                            <input type="hidden" name="action" value="edit_template">
+                            <input type="hidden" name="template_id" value="{{ edit_template.template_id }}">
+
+                            <div class="form-row">
+                                <div class="form-group col-md-3">
+                                    <label>network</label>
+                                    <select class="form-control" name="network" required>
+                                        {% for item in networks %}
+                                            <option value="{{ item.key }}" {% if item.key == edit_template.network %}selected{% endif %}>{{ item.key }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="form-group col-md-3">
+                                    <label>symbol</label>
+                                    <input class="form-control" name="symbol" value="{{ edit_template.symbol }}" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>pool_address</label>
+                                    <input class="form-control" name="pool_address" value="{{ edit_template.pool_address }}" required>
+                                </div>
+                                <div class="form-group col-md-1">
+                                    <label>fee_pct</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="fee_pct" value="{{ edit_template.fee_pct }}" required>
+                                </div>
+                                <div class="form-group col-md-1">
+                                    <label>cex_ratio</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="cex_ratio" value="{{ edit_template.cex_ratio }}" required>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group col-md-4">
+                                    <label>trigger_mode</label>
+                                    <select class="form-control" name="trigger_mode" required>
+                                        <option value="pct" {% if edit_template.trigger_mode == 'pct' %}selected{% endif %}>pct</option>
+                                        <option value="units" {% if edit_template.trigger_mode == 'units' %}selected{% endif %}>units</option>
+                                    </select>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>trigger_pct</label>
+                                    <input type="number" step="any" min="0" class="form-control" name="trigger_pct" value="{{ edit_template.trigger_pct }}" required>
+                                </div>
+                                <div class="form-group col-md-4">
+                                    <label>trigger_units</label>
+                                    <input type="number" step="1" min="0" class="form-control" name="trigger_units" value="{{ edit_template.trigger_units }}" required>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Save template</button>
+                            <a href="/runs/start" class="btn btn-secondary">Cancel edit</a>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Templates</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-striped mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>template_id</th>
+                                        <th>network</th>
+                                        <th>symbol</th>
+                                        <th>pool_address</th>
+                                        <th>fee_pct</th>
+                                        <th>cex_ratio</th>
+                                        <th>trigger_mode</th>
+                                        <th>trigger_pct</th>
+                                        <th>trigger_units</th>
+                                        <th>actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in templates %}
+                                        <tr>
+                                            <td>{{ item.template_id }}</td>
+                                            <td>{{ item.network }}</td>
+                                            <td>{{ item.symbol }}</td>
+                                            <td>{{ item.pool_address }}</td>
+                                            <td>{{ item.fee_pct }}</td>
+                                            <td>{{ item.cex_ratio }}</td>
+                                            <td>{{ item.trigger_mode }}</td>
+                                            <td>{{ item.trigger_pct }}</td>
+                                            <td>{{ item.trigger_units }}</td>
+                                            <td>
+                                                <a href="/runs/start?edit_template_id={{ item.template_id }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                                                <form method="POST" action="/runs/start" style="display:inline-block;">
+                                                    <input type="hidden" name="action" value="delete_template">
+                                                    <input type="hidden" name="template_id" value="{{ item.template_id }}">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/start_run.js') }}"></script>
+
+{% include '_footer.html' %}

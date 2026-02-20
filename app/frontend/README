@@ -1,0 +1,73 @@
+Frontend admin service (`app.py`)
+Date: 2026-02-13
+Version: 1.0
+
+==================================================
+1) Назначение
+==================================================
+
+`app/frontend` — админ-слой для Hedging.
+
+- Управление run-cycle через backend REST (`start/stop`).
+- Чтение текущего runtime-статуса через backend REST.
+- Чтение истории и агрегатов как primary source из Mongo:
+  - `backend_positions_active`
+  - `backend_positions_archive`
+  - `backend_hedger_runs`
+
+==================================================
+2) ENV
+==================================================
+
+Обязательные переменные окружения:
+
+- `FRONT_SECRET_KEY`
+- `FRONT_ADMIN_PASSWORD`
+- `RPC_KEY`
+- `TICK_MS`
+- `GTX_COOLDOWN_MS`
+- `ENTRANCE_TIMEOUT_MS`
+- `COWSWAP_API_TIMEOUT_SEC`
+- `COWSWAP_WAIT_TIMEOUT_SEC`
+- `COWSWAP_POLL_INTERVAL_SEC`
+
+Опционально:
+
+- `FRONT_SESSION_COOKIE_DOMAIN`
+- `FRONT_BACKEND_URL` (по умолчанию: `http://127.0.0.1:8080`)
+- `MONGO_URI` (по умолчанию: `mongodb://hedging_mongo:27017`)
+- `MONGO_DB` (по умолчанию: `hedging`)
+- `MONGO_COLLECTION` (по умолчанию: `hedge_runs`)
+
+==================================================
+3) Запуск
+==================================================
+
+```bash
+python app/frontend/app.py
+```
+
+Сервис стартует:
+
+- host: `0.0.0.0`
+- port: `8081`
+- threaded: `True`
+- debug: `False`
+
+==================================================
+4) UI страницы
+==================================================
+
+- `/dashboard` — системные агрегаты
+- `/positions` — уровень запусков (active + archive)
+- `/runs/start` — run templates и запуск по template
+- `/runs/<run_id>` — история итераций запуска
+- `/iterations/<iteration_id>` — детальная карточка итерации
+
+==================================================
+5) Принцип интерфейса
+==================================================
+
+- Ввод данных в frontend только через HTML-формы.
+- Вывод данных только в HTML-страницах.
+- JSON ввод/вывод на уровне frontend не используется.

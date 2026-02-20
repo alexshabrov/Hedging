@@ -3,7 +3,8 @@ Contract wrapper
 Date: 2026-02-09
 Version: 1.0
 """
-import json, math
+import json, math, time
+from pathlib import Path
 from decimal import Decimal, getcontext
 from typing import Dict, List, Optional
 from web3 import Web3
@@ -12,6 +13,10 @@ from dex.models.realtime_models import DexEventType, PriceEvent, SwapEvent
 from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, PositionState
 from dex.contract.params import Params
 from dex.contract.pool_calc import split_capital_into_tokens
+
+# Resolve project paths relative to this file, not process cwd.
+_CONTRACT_DIR = Path(__file__).resolve().parent
+_APP_DIR = _CONTRACT_DIR.parent.parent
 
 # Contract wrapper
 class ContractWrapper:
@@ -50,6 +55,9 @@ class ContractWrapper:
         self._account = None
 
         # Init
+        self._pool_abi_path = self._resolve_path_from_file(self._pool_abi_path)
+        self._erc20_abi_path = self._resolve_path_from_file(self._erc20_abi_path)
+        self._npm_abi_path = self._resolve_path_from_file(self._npm_abi_path)
         self._validate_params()
         self._init_web3()
         self._init_contracts()
@@ -167,6 +175,27 @@ class ContractWrapper:
 
         if str(self._wallet_address).lower() != str(self._account.address).lower():
             raise RuntimeError('wallet_address does not match private_key')
+
+    def _resolve_path_from_file(self, path: str) -> str:
+        if not isinstance(path, str) or len(path) == 0:
+            return path
+
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return str(path_obj)
+
+        # 1) Keep compatibility for callers that already pass a cwd-relative path.
+        if path_obj.exists():
+            return str(path_obj.resolve())
+
+        # 2) Default/project-relative: `app/<...>` root, e.g. dex/contract/abi/*.json
+        app_relative = (_APP_DIR / path_obj).resolve()
+        if app_relative.exists():
+            return str(app_relative)
+
+        # 3) Fallback for contract-local relative paths.
+        contract_relative = (_CONTRACT_DIR / path_obj).resolve()
+        return str(contract_relative)
 
     def _load_json(self, path: str):
         try:
@@ -618,11 +647,16 @@ class ContractWrapper:
         if not bool(receipt.status):
             raise RuntimeError('approve failed')
 
-        allowance = erc20.functions.allowance(
-            self._wallet_address,
-            self._npm_address,
-        ).call()
-        if int(allowance) < int(amount):
+        for t in range(3):
+            allowance = erc20.functions.allowance(
+                self._wallet_address,
+                self._npm_address,
+            ).call()
+            if int(allowance) >= int(amount):
+                break
+            if t < 2:
+                time.sleep(1)
+        else:
             raise RuntimeError('approve did not increase allowance')
 
     def get_balance(self, token_address: str) -> int:

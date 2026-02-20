@@ -1,0 +1,95 @@
+{% include '_header.html' %}
+
+<div class="content-wrapper">
+    <div class="container-fluid">
+        <div class="row pt-3">
+            <div class="col-sm-12">
+                <div class="card">
+                    <div class="card-header">Positions</div>
+                    <div class="card-body p-0">
+                        <table class="table table-bordered table-hover table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Run ID</th>
+                                    <th>Token ID</th>
+                                    <th>Symbol</th>
+                                    <th>DEX only</th>
+                                    <th>Mock source</th>
+                                    <th>Status</th>
+                                    <th>Started (UTC)</th>
+                                    <th>Runtime (D:H:M)</th>
+                                    <th>Iterations</th>
+                                    <th>Close upper</th>
+                                    <th>Close lower</th>
+                                    <th>Close total</th>
+                                    <th>Total quote</th>
+                                    <th>PnL with hedge</th>
+                                    <th>PnL without hedge</th>
+                                    <th>APR with hedge %</th>
+                                    <th>APR without hedge %</th>
+                                    <th>Fees</th>
+                                    <th>PnL: fees</th>
+                                    <th>PnL: fees + il</th>
+                                    <th>PnL: fees + il + gas</th>
+                                    <th>PnL: fees + il + gas + cex</th>
+                                    <th>APR: fees %</th>
+                                    <th>APR: fees + il %</th>
+                                    <th>APR: fees + il + gas %</th>
+                                    <th>APR: fees + il + gas + cex %</th>
+                                    <th>Price PnL</th>
+                                    <th>Hedge PnL</th>
+                                    <th>Gas/Costs PnL</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in rows %}
+                                    <tr>
+                                        <td><a href="/runs/{{ row.run_id }}">{{ row.run_id }}</a></td>
+                                        <td>
+                                            {% if row.token_id is not none %}
+                                                {{ row.token_id }}
+                                                {% if row.pool_url %}<a href="{{ row.pool_url }}" target="_blank" rel="noopener noreferrer" class="ml-1">Uniswap</a>{% endif %}
+                                                {% if row.revert_link %}<a href="{{ row.revert_link }}" target="_blank" rel="noopener noreferrer" class="ml-1">Revert</a>{% endif %}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ row.symbol }}</td>
+                                        <td>{% if row.dex_only %}yes{% else %}no{% endif %}</td>
+                                        <td>{{ row.mock_realtime_source }}</td>
+                                        <td>{% with status=row.status %}{% include 'modules/_status_badge.html' %}{% endwith %}</td>
+                                        <td>{{ utc_ts(row.first_started_at_ms) }}</td>
+                                        <td>{{ row.runtime_dhm }}</td>
+                                        <td>{{ row.iterations_finished }}</td>
+                                        <td>{{ row.close_trigger_upper_count }} ({{ '%.2f'|format(row.close_trigger_upper_pct) }}%)</td>
+                                        <td>{{ row.close_trigger_lower_count }} ({{ '%.2f'|format(row.close_trigger_lower_pct) }}%)</td>
+                                        <td>{{ row.close_trigger_total_count }}</td>
+                                        <td>{{ '%.4f'|format(row.total_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_with_hedge_quote) }} ({{ '%.2f'|format(row.pnl_with_hedge_pct) }}%)</td>
+                                        <td>{{ '%.4f'|format(row.pnl_without_hedge_quote) }} ({{ '%.2f'|format(row.pnl_without_hedge_pct) }}%)</td>
+                                        <td>{{ '%.3f'|format(row.apr_with_hedge_pct) }}</td>
+                                        <td>{{ '%.3f'|format(row.apr_without_hedge_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.fees_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_gas_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.pnl_fees_il_gas_cex_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_gas_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.apr_fees_il_gas_cex_pct) }}</td>
+                                        <td>{{ '%.4f'|format(row.price_pnl_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.hedge_pnl_quote) }}</td>
+                                        <td>{{ '%.4f'|format(row.costs_quote) }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include '_footer.html' %}

@@ -1,0 +1,206 @@
+"""
+Mongo storage service
+Date: 2026-02-13
+Version: 1.0
+"""
+from typing import List, Optional
+
+from pymongo import MongoClient  # type: ignore[import-not-found]
+
+from live.lib.logger import get_logger
+from frontend.modules.models.frontend_models import (
+    FrontendActivePositionDoc,
+    FrontendArchivePositionDoc,
+    FrontendIterationDoc,
+    FrontendRunTemplateDoc,
+)
+
+
+### Collections ###
+ACTIVE_POSITIONS_COLLECTION = 'backend_positions_active'
+ARCHIVE_POSITIONS_COLLECTION = 'backend_positions_archive'
+HEDGER_RUNS_COLLECTION = 'backend_hedger_runs'
+RUN_TEMPLATES_COLLECTION = 'frontend_run_templates'
+
+
+class StorageService:
+    def __init__(self, mongo_uri: str, mongo_db: str):
+        if not isinstance(mongo_uri, str) or len(mongo_uri) == 0:
+            raise RuntimeError('StorageService: mongo_uri is empty')
+        if not isinstance(mongo_db, str) or len(mongo_db) == 0:
+            raise RuntimeError('StorageService: mongo_db is empty')
+
+        self._mongo_client = MongoClient(str(mongo_uri), serverSelectionTimeoutMS=5000)
+        self._db = self._mongo_client[str(mongo_db)]
+        self._logger = get_logger('frontend_storage')
+
+        _ = self._mongo_client.server_info()
+        self._logger.info('storage_ready')
+
+    def list_active_positions(self) -> List[FrontendActivePositionDoc]:
+        col = self._db[str(ACTIVE_POSITIONS_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort('started_at_ms', -1)
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_active_positions: item is not dict: {type(item)}')
+            out.append(FrontendActivePositionDoc.from_dict(item))
+        return out
+
+    def list_archive_positions(self) -> List[FrontendArchivePositionDoc]:
+        col = self._db[str(ARCHIVE_POSITIONS_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort('finished_at_ms', -1)
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_archive_positions: item is not dict: {type(item)}')
+            out.append(FrontendArchivePositionDoc.from_dict(item))
+        return out
+
+    def find_position(self, run_id: str) -> Optional[FrontendActivePositionDoc]:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('StorageService.find_position: run_id is empty')
+
+        col = self._db[str(ACTIVE_POSITIONS_COLLECTION)]
+        item = col.find_one({'run_id': str(run_id)}, {'_id': 0})
+        if item is None:
+            return None
+        if not isinstance(item, dict):
+            raise RuntimeError(f'StorageService.find_position: item is not dict: {type(item)}')
+        return FrontendActivePositionDoc.from_dict(item)
+
+    def find_position_archive(self, run_id: str) -> Optional[FrontendArchivePositionDoc]:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('StorageService.find_position_archive: run_id is empty')
+
+        col = self._db[str(ARCHIVE_POSITIONS_COLLECTION)]
+        item = col.find_one({'run_id': str(run_id)}, {'_id': 0})
+        if item is None:
+            return None
+        if not isinstance(item, dict):
+            raise RuntimeError(f'StorageService.find_position_archive: item is not dict: {type(item)}')
+        return FrontendArchivePositionDoc.from_dict(item)
+
+    def list_iterations_by_run(self, run_id: str) -> List[FrontendIterationDoc]:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('StorageService.list_iterations_by_run: run_id is empty')
+
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        cursor = col.find({'run_id': str(run_id)}, {'_id': 0}).sort('iteration_no', -1)
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_iterations_by_run: item is not dict: {type(item)}')
+            out.append(FrontendIterationDoc.from_dict(item))
+        return out
+
+    def list_iterations_by_run_raw(self, run_id: str) -> List[dict]:
+        if not isinstance(run_id, str) or len(run_id) == 0:
+            raise RuntimeError('StorageService.list_iterations_by_run_raw: run_id is empty')
+
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        cursor = col.find({'run_id': str(run_id)}, {'_id': 0}).sort('iteration_no', -1)
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_iterations_by_run_raw: item is not dict: {type(item)}')
+            out.append(item)
+        return out
+
+    def list_iterations_all(self) -> List[FrontendIterationDoc]:
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort([('run_id', 1), ('iteration_no', 1)])
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_iterations_all: item is not dict: {type(item)}')
+            out.append(FrontendIterationDoc.from_dict(item))
+        return out
+
+    def list_iterations_all_raw(self) -> List[dict]:
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort([('run_id', 1), ('iteration_no', 1)])
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_iterations_all_raw: item is not dict: {type(item)}')
+            out.append(item)
+        return out
+
+    def find_iteration(self, iteration_id: str) -> FrontendIterationDoc:
+        if not isinstance(iteration_id, str) or len(iteration_id) == 0:
+            raise RuntimeError('StorageService.find_iteration: iteration_id is empty')
+
+        col = self._db[str(HEDGER_RUNS_COLLECTION)]
+        item = col.find_one({'id': str(iteration_id)}, {'_id': 0})
+        if item is None:
+            raise RuntimeError(f'StorageService.find_iteration: iteration not found: {iteration_id}')
+        if not isinstance(item, dict):
+            raise RuntimeError(f'StorageService.find_iteration: item is not dict: {type(item)}')
+        return FrontendIterationDoc.from_dict(item)
+
+    def list_run_templates(self) -> List[FrontendRunTemplateDoc]:
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        cursor = col.find({}, {'_id': 0}).sort('updated_at_ms', -1)
+
+        out = []
+        for item in cursor:
+            if not isinstance(item, dict):
+                raise RuntimeError(f'StorageService.list_run_templates: item is not dict: {type(item)}')
+            out.append(FrontendRunTemplateDoc.from_dict(item))
+        return out
+
+    def create_run_template(self, template: FrontendRunTemplateDoc) -> None:
+        if template is None:
+            raise RuntimeError('StorageService.create_run_template: template is None')
+        if not isinstance(template, FrontendRunTemplateDoc):
+            raise RuntimeError(f'StorageService.create_run_template: template is not FrontendRunTemplateDoc: {type(template)}')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        doc = template.model_dump()
+        res = col.replace_one({'template_id': str(template.template_id)}, doc, upsert=True)
+        if res is None:
+            raise RuntimeError('StorageService.create_run_template: replace_one returned None')
+
+    def update_run_template(self, template: FrontendRunTemplateDoc) -> None:
+        if template is None:
+            raise RuntimeError('StorageService.update_run_template: template is None')
+        if not isinstance(template, FrontendRunTemplateDoc):
+            raise RuntimeError(f'StorageService.update_run_template: template is not FrontendRunTemplateDoc: {type(template)}')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        doc = template.model_dump()
+        res = col.replace_one({'template_id': str(template.template_id)}, doc, upsert=False)
+        if res is None:
+            raise RuntimeError('StorageService.update_run_template: replace_one returned None')
+        if int(res.matched_count) <= 0:
+            raise RuntimeError(f'StorageService.update_run_template: template not found: {template.template_id}')
+
+    def find_run_template(self, template_id: str) -> FrontendRunTemplateDoc:
+        if not isinstance(template_id, str) or len(template_id) == 0:
+            raise RuntimeError('StorageService.find_run_template: template_id is empty')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        item = col.find_one({'template_id': str(template_id)}, {'_id': 0})
+        if item is None:
+            raise RuntimeError(f'StorageService.find_run_template: template not found: {template_id}')
+        if not isinstance(item, dict):
+            raise RuntimeError(f'StorageService.find_run_template: item is not dict: {type(item)}')
+        return FrontendRunTemplateDoc.from_dict(item)
+
+    def delete_run_template(self, template_id: str) -> None:
+        if not isinstance(template_id, str) or len(template_id) == 0:
+            raise RuntimeError('StorageService.delete_run_template: template_id is empty')
+
+        col = self._db[str(RUN_TEMPLATES_COLLECTION)]
+        res = col.delete_one({'template_id': str(template_id)})
+        if res is None:
+            raise RuntimeError('StorageService.delete_run_template: delete_one returned None')
+        if int(res.deleted_count) <= 0:
+            raise RuntimeError(f'StorageService.delete_run_template: template not found: {template_id}')

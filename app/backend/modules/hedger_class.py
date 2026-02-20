@@ -10,6 +10,7 @@ from pymongo import MongoClient  # type: ignore[import-not-found]
 
 from live.lib.logger import get_logger
 from live.exchanges.exchange_factory import get_exchange_class, get_realtime_class
+from live.exchanges.exchange_models import Rule
 from live.logic.hedging import HedgeEngine
 from live.logic.models import (
     HedgeConfig,
@@ -19,22 +20,29 @@ from live.logic.models import (
     HedgeOffsetsPctX10000,
     HedgeVolumeRequest,
     HedgeLeg,
+    HedgeSnapshot,
+    HedgeMetrics,
+    HedgeStats as LiveHedgeStats,
+    HedgeChaseMetrics,
+    HedgeChaseKind,
 )
 
 from dex.contract.contract_wrapper import ContractWrapper
 from dex.swappers.swapper_factory import SwapperFactory
 from dex.models.swapper_models import CowSwapConfig, SwapRequest, SwapperType, SwapResult
-from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult
+from dex.models.contract_models import MintResult, DecreaseLiquidityResult, CollectFeesResult, DexRunStats
 
-from models.hedger_models import (
+from backend.models.hedger_models import (
     HedgerConfig,
     HedgeCalcStats,
-    UniswapStats,
     LiveStats,
     HedgerStats,
     HedgeRunStatus,
     CexTriggerMode,
+    MockRealtimeSource,
 )
+from backend.modules.mock_hedge_class import MockHedge
+from backend.models.mock_hedge_models import MockHedgeTriggerEvent, MockHedgeBoundary
 
 
 ### Hedger ###
@@ -44,18 +52,20 @@ class Hedger:
             raise RuntimeError('Hedger: config is None')
         if not isinstance(config, HedgerConfig):
             raise RuntimeError(f'Hedger: config is not HedgerConfig: {type(config)}')
-        if not isinstance(binance_key, str) or len(binance_key) == 0:
-            raise RuntimeError('Hedger: binance_key is empty')
-        if not isinstance(binance_secret, str) or len(binance_secret) == 0:
-            raise RuntimeError('Hedger: binance_secret is empty')
         if not isinstance(private_key, str) or len(private_key) == 0:
             raise RuntimeError('Hedger: private_key is empty')
         if wallet_address is not None and (not isinstance(wallet_address, str) or len(wallet_address) == 0):
             raise RuntimeError('Hedger: wallet_address is empty')
-        
+
+        if not bool(config.dex_only):
+            if not isinstance(binance_key, str) or len(binance_key) == 0:
+                raise RuntimeError('Hedger: binance_key is empty')
+            if not isinstance(binance_secret, str) or len(binance_secret) == 0:
+                raise RuntimeError('Hedger: binance_secret is empty')
+
         self.config = config
-        self._binance_key = str(binance_key)
-        self._binance_secret = str(binance_secret)
+        self._binance_key = None if binance_key is None else str(binance_key)
+        self._binance_secret = None if binance_secret is None else str(binance_secret)
         self._private_key = str(private_key)
         self._wallet_address = str(wallet_address) if wallet_address is not None else None
         
@@ -65,8 +75,10 @@ class Hedger:
         self._rt = None
         self._cw = None
         self._rule = None
+        self._stop_requested_evt = threading.Event()
         
         self.last_stats = None
+        self._is_running = False
         
         self._validate_config()
         self._init_clients()
@@ -85,39 +97,52 @@ class Hedger:
                 private_key=str(self._private_key),
                 wallet_address=str(self._wallet_address) if self._wallet_address is not None else None,
             )
-            
+
+            self._cw = cw
+
+            if bool(self.config.dex_only):
+                self._logger.info(
+                    f'hedger_clients_ready_dex_only symbol={self.config.symbol} '
+                    f'pool={self.config.pool_address} network={self.config.network}'
+                )
+                return
+
+            if self._binance_key is None or len(self._binance_key) == 0:
+                raise RuntimeError('Hedger: binance_key is empty')
+            if self._binance_secret is None or len(self._binance_secret) == 0:
+                raise RuntimeError('Hedger: binance_secret is empty')
+
             ExchangeClass = get_exchange_class('Binance')
             RealtimeClass = get_realtime_class('Binance')
-            
+
             exchange = ExchangeClass(
                 key=str(self._binance_key),
                 secret=str(self._binance_secret),
                 hedge_mode=False,
                 is_realtime=True,
             )
-            
+
             rt = RealtimeClass()
             rt.start()
-            
+
             exchange.wait_for_connect(timeout=60)
             rt.wait_for_connect(timeout=60)
-            
+
             rules = exchange.get_rules()
             if self.config.symbol not in rules:
                 raise RuntimeError(f'Hedger: rule not found for symbol: {self.config.symbol}')
-            
+
             rule = rules[self.config.symbol]
-            
+
             if float(rule.price_step) <= 0:
                 raise RuntimeError(f'Hedger: bad price_step for symbol={self.config.symbol}: {rule.price_step}')
             if float(rule.lot_step) <= 0:
                 raise RuntimeError(f'Hedger: bad lot_step for symbol={self.config.symbol}: {rule.lot_step}')
-            
-            self._cw = cw
+
             self._exchange = exchange
             self._rt = rt
             self._rule = rule
-            
+
             self._logger.info(f'hedger_clients_ready symbol={self.config.symbol} pool={self.config.pool_address} network={self.config.network}')
         
         except Exception:
@@ -146,8 +171,13 @@ class Hedger:
     
     def _reset_run_state(self) -> None:
         self.last_stats = None
+        self._stop_requested_evt.clear()
         
         self._run_hedge = None
+        self._run_mock_hedge = None
+        self._run_mock_hedge_uid = None
+        self._run_mock_trigger_event = None
+        self._run_mock_trigger_evt = threading.Event()
         self._run_token_id = None
         
         self._run_mint_res = None
@@ -157,7 +187,6 @@ class Hedger:
         self._run_reb_res = None
         
         self._run_last_snapshot = None
-        self._run_last_snapshot_json = None
         
         self._run_init_balance0_raw = 0
         self._run_init_balance1_raw = 0
@@ -165,50 +194,72 @@ class Hedger:
         self._run_final_balance1_raw = 0
         self._run_mint_tx_timestamp_ms = 0
         self._run_decrease_tx_timestamp_ms = 0
+        self._run_finished_at_ms = 0
         
         self._run_calc_stats = None
         self._run_status = HedgeRunStatus.INITIALIZED
         self._run_error = None
         self._run_main_exc = None
+
+    def _is_benign_stop_error(self, e: Exception) -> bool:
+        msg = str(e).lower()
+        if 'not started' in msg:
+            return True
+        if 'already closed' in msg:
+            return True
+        return False
+
+    def request_stop(self) -> None:
+        self._stop_requested_evt.set()
     
     def stop(self) -> None:
         cleanup_errors = []
+
+        # While run() is active, stop is only a cooperative stop request.
+        if bool(self._is_running):
+            self.request_stop()
+            return
         
         if self._rt is not None:
             try:
                 self._logger.info('hedger_rt_stop')
                 self._rt.stop()
             except Exception as e:
-                cleanup_errors.append(e)
+                if not self._is_benign_stop_error(e):
+                    cleanup_errors.append(e)
         
         if self._exchange is not None:
             try:
                 self._logger.info('hedger_exchange_stop')
                 self._exchange.stop()
             except Exception as e:
-                cleanup_errors.append(e)
+                if not self._is_benign_stop_error(e):
+                    cleanup_errors.append(e)
         
         self._rt = None
         self._exchange = None
-        self._cw = None
-        self._rule = None
+        if not bool(self._is_running):
+            self._cw = None
+            self._rule = None
         
-        if len(cleanup_errors) > 0:
+        if len(cleanup_errors) > 0 and (not bool(self._is_running)):
             if len(cleanup_errors) == 1:
                 raise cleanup_errors[0]
             raise RuntimeError(f'Hedger.stop failed: cleanup_errors={cleanup_errors}')
     
     def run(self) -> HedgerStats:
         self._reset_run_state()
-        
-        if self._exchange is None:
-            raise RuntimeError('Hedger: exchange is not initialized')
-        if self._rt is None:
-            raise RuntimeError('Hedger: realtime is not initialized')
+        self._is_running = True
+
         if self._cw is None:
             raise RuntimeError('Hedger: contract wrapper is not initialized')
-        if self._rule is None:
-            raise RuntimeError('Hedger: symbol rule is not initialized')
+        if not bool(self.config.dex_only):
+            if self._exchange is None:
+                raise RuntimeError('Hedger: exchange is not initialized')
+            if self._rt is None:
+                raise RuntimeError('Hedger: realtime is not initialized')
+            if self._rule is None:
+                raise RuntimeError('Hedger: symbol rule is not initialized')
         
         self._logger.info(f'hedger_start symbol={self.config.symbol} pool={self.config.pool_address} network={self.config.network}')
         
@@ -273,25 +324,38 @@ class Hedger:
             self._logger.info(f'hedger_quote total_quote={self.config.total_quote} cex_ratio={self.config.cex_ratio} hedge_quote={hedge_quote}')
             
             trigger_mode = self.config.trigger_mode
-            if trigger_mode == CexTriggerMode.ONE_TICK:
-                price_step = float(self._rule.price_step)
+            if trigger_mode == CexTriggerMode.UNITS:
+                trigger_units = int(self.config.trigger_units)
+                if int(trigger_units) <= 0:
+                    raise RuntimeError('Hedger: trigger_units must be > 0 for units mode')
+
+                if bool(self.config.dex_only):
+                    price_step = float(price_now) * 1e-4
+                else:
+                    if self._rule is None:
+                        raise RuntimeError('Hedger: symbol rule is not initialized for units mode')
+                    price_step = float(self._rule.price_step)
                 if float(price_step) <= 0:
-                    raise RuntimeError(f'Hedger: bad price_step for one_tick mode: {self._rule.price_step}')
-                
-                trigger_offset_pct_x10000 = int(round((float(price_step) / float(price_now)) * 1_000_000.0))
+                    raise RuntimeError(f'Hedger: bad price_step for units mode: {price_step}')
+
+                trigger_delta = float(price_step) * float(trigger_units)
+                if float(trigger_delta) <= 0:
+                    raise RuntimeError('Hedger: trigger_delta must be > 0 for units mode')
+
+                trigger_offset_pct_x10000 = int(round((float(trigger_delta) / float(price_now)) * 1_000_000.0))
                 if int(trigger_offset_pct_x10000) <= 0:
-                    raise RuntimeError('Hedger: one_tick produced non-positive trigger_offset_pct_x10000')
-            elif trigger_mode == CexTriggerMode.SMALL_PCT:
+                    raise RuntimeError('Hedger: units mode produced non-positive trigger_offset_pct_x10000')
+            elif trigger_mode == CexTriggerMode.PCT:
                 trigger_offset_pct_x10000 = int(round(float(self.config.trigger_pct) * 10_000.0))
                 if int(trigger_offset_pct_x10000) <= 0:
-                    raise RuntimeError('Hedger: small_pct produced non-positive trigger_offset_pct_x10000')
+                    raise RuntimeError('Hedger: pct mode produced non-positive trigger_offset_pct_x10000')
             else:
                 raise RuntimeError(f'Hedger: unsupported trigger_mode: {trigger_mode}')
             
             if int(trigger_offset_pct_x10000) >= int(target_offset_pct_x10000):
                 raise RuntimeError(f'Hedger: trigger_offset_pct_x10000 must be < target_offset_pct_x10000, got trigger={trigger_offset_pct_x10000} target={target_offset_pct_x10000}')
             
-            self._logger.info(f'hedger_trigger trigger_mode={trigger_mode.value} trigger_pct={self.config.trigger_pct} trigger_offset_pct_x10000={trigger_offset_pct_x10000} target_offset_pct_x10000={target_offset_pct_x10000}')
+            self._logger.info(f'hedger_trigger trigger_mode={trigger_mode.value} trigger_pct={self.config.trigger_pct} trigger_units={self.config.trigger_units} trigger_offset_pct_x10000={trigger_offset_pct_x10000} target_offset_pct_x10000={target_offset_pct_x10000}')
             
             self._run_calc_stats = HedgeCalcStats(
                 base_price=float(price_now),
@@ -305,63 +369,108 @@ class Hedger:
                 hedge_quote=float(hedge_quote),
             )
             
-            def on_volume(req: HedgeVolumeRequest) -> int:
-                if req is None:
-                    raise RuntimeError('on_volume: req is None')
-                if not isinstance(req, HedgeVolumeRequest):
-                    raise RuntimeError(f'on_volume: req is not HedgeVolumeRequest: {type(req)}')
-                if req.symbol != self.config.symbol:
-                    raise RuntimeError(f'on_volume: symbol mismatch: req.symbol={req.symbol} config.symbol={self.config.symbol}')
-                if req.leg != HedgeLeg.LONG and req.leg != HedgeLeg.SHORT:
-                    raise RuntimeError(f'on_volume: bad leg: {req.leg}')
+            if bool(self.config.dex_only):
+                self._run_mock_hedge = MockHedge(config=self.config, cw=self._cw)
+                self._run_mock_hedge.start()
+
+                wait_started_at_ms = int(time.time() * 1000)
+                while True:
+                    try:
+                        _ = self._run_mock_hedge.get_last_price(str(self.config.symbol))
+                        break
+                    except Exception:
+                        self._run_mock_hedge.check()
+
+                    waited_ms = int(time.time() * 1000) - int(wait_started_at_ms)
+                    if int(waited_ms) > int(self.config.entrance_timeout_ms):
+                        raise RuntimeError(
+                            'Hedger: mock realtime price is not ready in time '
+                            f'waited_ms={waited_ms} timeout_ms={self.config.entrance_timeout_ms}'
+                        )
+                    time.sleep(0.05)
+
+                self._run_mock_hedge_uid = str(int(time.time() * 1000))
+
+                def on_mock_trigger(event: MockHedgeTriggerEvent) -> None:
+                    if event is None:
+                        raise RuntimeError('Hedger.on_mock_trigger: event is None')
+                    if not isinstance(event, MockHedgeTriggerEvent):
+                        raise RuntimeError(f'Hedger.on_mock_trigger: event is not MockHedgeTriggerEvent: {type(event)}')
+                    self._run_mock_trigger_event = event
+                    self._run_mock_trigger_evt.set()
+
+                self._run_mock_hedge.start_hedge(
+                    uid=str(self._run_mock_hedge_uid),
+                    symbol=str(self.config.symbol),
+                    target_lower_price=float(price_lower),
+                    target_upper_price=float(price_upper),
+                    callback=on_mock_trigger,
+                )
+                self._logger.info(
+                    f'hedger_mock_hedge_started uid={self._run_mock_hedge_uid} '
+                    f'source={self.config.mock_realtime_source.value}'
+                )
+            else:
+                def on_volume(req: HedgeVolumeRequest) -> int:
+                    if req is None:
+                        raise RuntimeError('on_volume: req is None')
+                    if not isinstance(req, HedgeVolumeRequest):
+                        raise RuntimeError(f'on_volume: req is not HedgeVolumeRequest: {type(req)}')
+                    if req.symbol != self.config.symbol:
+                        raise RuntimeError(f'on_volume: symbol mismatch: req.symbol={req.symbol} config.symbol={self.config.symbol}')
+                    if req.leg != HedgeLeg.LONG and req.leg != HedgeLeg.SHORT:
+                        raise RuntimeError(f'on_volume: bad leg: {req.leg}')
+                    
+                    price_units = int(req.price_units)
+                    if int(price_units) <= 0:
+                        raise RuntimeError(f'on_volume: bad price_units: {price_units}')
+
+                    if self._rule is None:
+                        raise RuntimeError('on_volume: symbol rule is not initialized')
+                    
+                    price_step = float(self._rule.price_step)
+                    lot_step = float(self._rule.lot_step)
+                    
+                    if float(price_step) <= 0:
+                        raise RuntimeError(f'on_volume: bad price_step: {self._rule.price_step}')
+                    if float(lot_step) <= 0:
+                        raise RuntimeError(f'on_volume: bad lot_step: {self._rule.lot_step}')
+                    
+                    price_float = float(price_units) * float(price_step)
+                    if float(price_float) <= 0:
+                        raise RuntimeError(f'on_volume: bad price_float: {price_float}')
+                    
+                    base_volume = float(hedge_quote) / float(price_float)
+                    base_units = int(base_volume / float(lot_step))
+                    
+                    if int(base_units) <= 0:
+                        raise RuntimeError(f'on_volume: bad base_units: {base_units} from hedge_quote={hedge_quote} price_float={price_float}')
+                    
+                    return int(base_units)
                 
-                price_units = int(req.price_units)
-                if int(price_units) <= 0:
-                    raise RuntimeError(f'on_volume: bad price_units: {price_units}')
+                cfg = HedgeConfig(
+                    hedge_id=str(int(time.time() * 1000)),
+                    symbol=str(self.config.symbol),
+                    hedge_mode=HedgeMode.BOTH,
+                    trigger_offset_pct_x10000=HedgeOffsetsPctX10000(
+                        long=int(trigger_offset_pct_x10000),
+                        short=int(trigger_offset_pct_x10000),
+                    ),
+                    target_offset_pct_x10000=HedgeOffsetsPctX10000(
+                        long=int(target_offset_pct_x10000),
+                        short=int(target_offset_pct_x10000),
+                    ),
+                    execution_params=HedgeExecutionParams(
+                        tick_ms=int(self.config.tick_ms),
+                        gtx_cooldown_ms=int(self.config.gtx_cooldown_ms),
+                        entrance_timeout_ms=int(self.config.entrance_timeout_ms),
+                    ),
+                )
                 
-                price_step = float(self._rule.price_step)
-                lot_step = float(self._rule.lot_step)
+                self._run_hedge = HedgeEngine(config=cfg, exchange=self._exchange, realtime=self._rt, on_volume=on_volume)
+                self._run_hedge.start()
                 
-                if float(price_step) <= 0:
-                    raise RuntimeError(f'on_volume: bad price_step: {self._rule.price_step}')
-                if float(lot_step) <= 0:
-                    raise RuntimeError(f'on_volume: bad lot_step: {self._rule.lot_step}')
-                
-                price_float = float(price_units) * float(price_step)
-                if float(price_float) <= 0:
-                    raise RuntimeError(f'on_volume: bad price_float: {price_float}')
-                
-                base_volume = float(hedge_quote) / float(price_float)
-                base_units = int(base_volume / float(lot_step))
-                
-                if int(base_units) <= 0:
-                    raise RuntimeError(f'on_volume: bad base_units: {base_units} from hedge_quote={hedge_quote} price_float={price_float}')
-                
-                return int(base_units)
-            
-            cfg = HedgeConfig(
-                hedge_id=str(int(time.time() * 1000)),
-                symbol=str(self.config.symbol),
-                hedge_mode=HedgeMode.BOTH,
-                trigger_offset_pct_x10000=HedgeOffsetsPctX10000(
-                    long=int(trigger_offset_pct_x10000),
-                    short=int(trigger_offset_pct_x10000),
-                ),
-                target_offset_pct_x10000=HedgeOffsetsPctX10000(
-                    long=int(target_offset_pct_x10000),
-                    short=int(target_offset_pct_x10000),
-                ),
-                execution_params=HedgeExecutionParams(
-                    tick_ms=int(self.config.tick_ms),
-                    gtx_cooldown_ms=int(self.config.gtx_cooldown_ms),
-                    entrance_timeout_ms=int(self.config.entrance_timeout_ms),
-                ),
-            )
-            
-            self._run_hedge = HedgeEngine(config=cfg, exchange=self._exchange, realtime=self._rt, on_volume=on_volume)
-            self._run_hedge.start()
-            
-            self._logger.info(f'hedger_hedge_started hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
+                self._logger.info(f'hedger_hedge_started hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
             
             token0_address = self._cw.get_token0_address()
             token1_address = self._cw.get_token1_address()
@@ -400,31 +509,78 @@ class Hedger:
             
             self._logger.info(f'hedger_position token_id={self._run_token_id} price_current={self._run_pos_state.price_current} price_lower={self._run_pos_state.price_lower} price_upper={self._run_pos_state.price_upper}')
             
-            last_mutation_counter = -1
-            
-            while True:
-                self._run_hedge.check()
-                snap = self._run_hedge.status()
+            if bool(self.config.dex_only):
+                while True:
+                    if bool(self._stop_requested_evt.is_set()):
+                        self._logger.info('hedger_stop_requested')
+                        self._run_status = HedgeRunStatus.FINISHED
+                        self._run_last_snapshot = self._build_mock_snapshot(
+                            price=float(self._cw.get_current_traditional_price()),
+                            close_reason='manual_stop',
+                            status=HedgeStatus.CLOSED,
+                        )
+                        break
+
+                    if self._run_mock_hedge is None:
+                        raise RuntimeError('Hedger: mock hedge is not initialized')
+                    self._run_mock_hedge.check()
+
+                    if bool(self._run_mock_trigger_evt.is_set()):
+                        if self._run_mock_trigger_event is None:
+                            raise RuntimeError('Hedger: mock trigger event flag is set but event is missing')
+                        boundary = self._run_mock_trigger_event.boundary
+                        if boundary == MockHedgeBoundary.LOWER:
+                            close_reason = 'mock_lower'
+                        elif boundary == MockHedgeBoundary.UPPER:
+                            close_reason = 'mock_upper'
+                        else:
+                            raise RuntimeError(f'Hedger: unsupported mock boundary: {boundary}')
+
+                        self._run_status = HedgeRunStatus.FINISHED
+                        self._run_last_snapshot = self._build_mock_snapshot(
+                            price=float(self._run_mock_trigger_event.trigger_price),
+                            close_reason=close_reason,
+                            status=HedgeStatus.CLOSED,
+                        )
+                        self._logger.info(
+                            f'hedger_mock_closed uid={self._run_mock_trigger_event.uid} '
+                            f'boundary={self._run_mock_trigger_event.boundary.value} '
+                            f'price={self._run_mock_trigger_event.trigger_price}'
+                        )
+                        break
+
+                    time.sleep(0.05)
+            else:
+                last_mutation_counter = -1
                 
-                mc = int(snap.mutation_counter)
-                if int(mc) != int(last_mutation_counter):
-                    last_mutation_counter = int(mc)
-                    self._run_last_snapshot = snap
-                    raw = self._run_hedge.status_json()
-                    self._run_last_snapshot_json = raw.decode('utf-8')
-                    self._logger.info(self._run_last_snapshot_json)
-                
-                if snap.status == HedgeStatus.CLOSED:
-                    self._run_status = HedgeRunStatus.FINISHED
-                    self._logger.info(f'hedger_closed hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
-                    break
-                
-                if snap.status == HedgeStatus.FAILED:
-                    self._run_status = HedgeRunStatus.FAILED
-                    self._logger.info(f'hedger_failed hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
-                    break
-                
-                time.sleep(0.05)
+                while True:
+                    if bool(self._stop_requested_evt.is_set()):
+                        self._logger.info('hedger_stop_requested')
+                        if self._run_hedge is not None and bool(self._run_hedge.started):
+                            self._run_hedge.stop()
+                        self._run_status = HedgeRunStatus.FINISHED
+                        break
+
+                    self._run_hedge.check()
+                    snap = self._run_hedge.status()
+                    
+                    mc = int(snap.mutation_counter)
+                    if int(mc) != int(last_mutation_counter):
+                        last_mutation_counter = int(mc)
+                        self._run_last_snapshot = snap
+                        self._logger.info(f'hedger_snapshot_update mutation_counter={mc} status={snap.status.value}')
+                    
+                    if snap.status == HedgeStatus.CLOSED:
+                        self._run_status = HedgeRunStatus.FINISHED
+                        self._logger.info(f'hedger_closed hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
+                        break
+                    
+                    if snap.status == HedgeStatus.FAILED:
+                        self._run_status = HedgeRunStatus.FAILED
+                        self._logger.info(f'hedger_failed hedge_id={cfg.hedge_id} symbol={self.config.symbol}')
+                        break
+                    
+                    time.sleep(0.05)
         
         except Exception:
             self._run_status = HedgeRunStatus.FAILED
@@ -487,8 +643,12 @@ class Hedger:
                     if self._run_hedge is not None and bool(self._run_hedge.started):
                         self._logger.info('hedger_hedge_stop')
                         self._run_hedge.stop()
+                    if self._run_mock_hedge is not None:
+                        self._logger.info('hedger_mock_hedge_stop')
+                        self._run_mock_hedge.stop()
                 except Exception as e:
-                    _add_cleanup_error(e)
+                    if not self._is_benign_stop_error(e):
+                        _add_cleanup_error(e)
             
             dex_cleanup_thread = threading.Thread(target=_cleanup_dex, name='hedger_dex_cleanup')
             live_cleanup_thread = threading.Thread(target=_cleanup_live, name='hedger_live_cleanup')
@@ -501,9 +661,11 @@ class Hedger:
             
             if len(cleanup_errors) > 0:
                 self._logger.error(f'hedger_cleanup_errors errors={cleanup_errors}')
+
+            self._run_finished_at_ms = int(time.time() * 1000)
             
             if self._run_calc_stats is not None:
-                uniswap_stats = UniswapStats(
+                uniswap_stats = DexRunStats(
                     token_id=int(self._run_token_id) if self._run_token_id is not None else None,
                     mint=self._run_mint_res,
                     mint_tx_timestamp_ms=int(self._run_mint_tx_timestamp_ms),
@@ -517,10 +679,25 @@ class Hedger:
                     final_balance0_raw=int(self._run_final_balance0_raw),
                     final_balance1_raw=int(self._run_final_balance1_raw),
                 )
+
+                if bool(self.config.dex_only) and self._run_last_snapshot is None:
+                    if self._cw is None:
+                        raise RuntimeError('Hedger: contract wrapper is not initialized for mock snapshot fallback')
+
+                    fallback_status = HedgeStatus.CLOSED
+                    fallback_reason = 'mock_closed'
+                    if self._run_status == HedgeRunStatus.FAILED:
+                        fallback_status = HedgeStatus.FAILED
+                        fallback_reason = 'mock_failed'
+
+                    self._run_last_snapshot = self._build_mock_snapshot(
+                        price=float(self._cw.get_current_traditional_price()),
+                        close_reason=fallback_reason,
+                        status=fallback_status,
+                    )
                 
                 live_stats = LiveStats(
                     last_snapshot=self._run_last_snapshot,
-                    last_snapshot_json=self._run_last_snapshot_json,
                 )
                 
                 if self._run_main_exc is not None:
@@ -532,6 +709,7 @@ class Hedger:
                     calc=self._run_calc_stats,
                     uniswap=uniswap_stats,
                     live=live_stats,
+                    finished_at_ms=int(self._run_finished_at_ms),
                     error=self._run_error,
                 )
                 
@@ -542,6 +720,8 @@ class Hedger:
                     self._write_stats(self.last_stats)
                 except Exception as e:
                     cleanup_errors.append(e)
+
+            self._is_running = False
             
             if self._run_main_exc is not None and len(cleanup_errors) > 0:
                 _t, exc, _tb = self._run_main_exc
@@ -560,6 +740,89 @@ class Hedger:
             raise RuntimeError('Hedger: last_stats is None after run')
         
         return self.last_stats
+
+    def _build_mock_snapshot(self, price: float, close_reason: str, status: HedgeStatus) -> HedgeSnapshot:
+        if float(price) <= 0:
+            raise RuntimeError(f'Hedger._build_mock_snapshot: price must be > 0: {price}')
+        if not isinstance(close_reason, str) or len(close_reason) == 0:
+            raise RuntimeError('Hedger._build_mock_snapshot: close_reason is empty')
+        if status != HedgeStatus.CLOSED and status != HedgeStatus.FAILED:
+            raise RuntimeError(f'Hedger._build_mock_snapshot: unsupported status: {status}')
+
+        step = '0.00000001'
+        rule = Rule(
+            price_step=str(step),
+            lot_step='0.0001',
+            min_base_volume='0.0001',
+            max_base_volume='1000000000',
+            min_quote_volume='0.0001',
+            max_quote_volume='1000000000',
+        )
+        last_mid_price_units = int(round(float(price) / float(step)))
+        if int(last_mid_price_units) <= 0:
+            raise RuntimeError(f'Hedger._build_mock_snapshot: bad last_mid_price_units: {last_mid_price_units}')
+
+        now_ms = int(time.time() * 1000)
+        started_ms = int(self._run_mint_tx_timestamp_ms)
+        if int(started_ms) <= 0:
+            started_ms = int(now_ms)
+
+        chase = HedgeChaseMetrics(
+            cmd_id='mock_open',
+            kind=HedgeChaseKind.OPEN,
+            started_ms=int(started_ms),
+            finished_ms=int(now_ms),
+            order_side='BUY',
+            intended_price_units=int(last_mid_price_units),
+            target_base_units=1,
+            filled_base_units=1,
+            filled_quote_units=1,
+            orders_created=1,
+            fills=1,
+            gtx_violations=0,
+            exchange_errors=0,
+            ok=True,
+            error=None,
+            avg_price_units=int(last_mid_price_units),
+            slippage_pct_x10000=0,
+        )
+
+        metrics = HedgeMetrics(
+            last_mid_price_units=int(last_mid_price_units),
+            base_balance_units=1,
+            quote_balance_units=1,
+            quote_turnover_units=1,
+            realized_pnl_quote_units=0,
+            unrealized_pnl_quote_units=0,
+            trigger_ms=int(started_ms),
+            opened_ms=int(started_ms),
+            close_trigger_ms=int(now_ms),
+            closed_ms=int(now_ms),
+            chases=[chase],
+            neutral_excursions_pct_x10000=[],
+        )
+
+        return HedgeSnapshot(
+            hedge_id=f'mock_{int(now_ms)}',
+            symbol=str(self.config.symbol),
+            status=status,
+            started_ms=int(started_ms),
+            updated_ms=int(now_ms),
+            mutation_counter=1,
+            base_price_units=int(last_mid_price_units),
+            lines=None,
+            symbol_rule=rule,
+            opened_leg=HedgeLeg.LONG,
+            opened_base_units=1,
+            close_reason=str(close_reason),
+            last_error=None,
+            stats=LiveHedgeStats(
+                chases_started=1,
+                chases_done=1,
+                position_events=0,
+            ),
+            metrics=metrics,
+        )
     
     def _validate_config(self) -> None:
         cfg = self.config
@@ -595,12 +858,16 @@ class Hedger:
             raise RuntimeError('HedgerConfig.cex_ratio must be > 0')
         if not isinstance(cfg.trigger_mode, CexTriggerMode):
             raise RuntimeError(f'HedgerConfig.trigger_mode is not CexTriggerMode: {type(cfg.trigger_mode)}')
-        if cfg.trigger_mode == CexTriggerMode.SMALL_PCT:
+        if cfg.trigger_mode == CexTriggerMode.PCT:
             if float(cfg.trigger_pct) <= 0:
-                raise RuntimeError('HedgerConfig.trigger_pct must be > 0 for small_pct mode')
-        elif cfg.trigger_mode == CexTriggerMode.ONE_TICK:
-            if float(cfg.trigger_pct) <= 0:
-                raise RuntimeError('HedgerConfig.trigger_pct must be > 0')
+                raise RuntimeError('HedgerConfig.trigger_pct must be > 0 for pct mode')
+            if int(cfg.trigger_units) != 0:
+                raise RuntimeError('HedgerConfig.trigger_units must be 0 for pct mode')
+        elif cfg.trigger_mode == CexTriggerMode.UNITS:
+            if int(cfg.trigger_units) <= 0:
+                raise RuntimeError('HedgerConfig.trigger_units must be > 0 for units mode')
+            if float(cfg.trigger_pct) != 0.0:
+                raise RuntimeError('HedgerConfig.trigger_pct must be 0 for units mode')
         else:
             raise RuntimeError(f'HedgerConfig.trigger_mode is unsupported: {cfg.trigger_mode}')
         if not isinstance(cfg.mongo_uri, str) or len(cfg.mongo_uri) == 0:
@@ -621,6 +888,19 @@ class Hedger:
             raise RuntimeError('HedgerConfig.cowswap_wait_timeout_sec must be > 0')
         if int(cfg.cowswap_poll_interval_sec) <= 0:
             raise RuntimeError('HedgerConfig.cowswap_poll_interval_sec must be > 0')
+        if not isinstance(cfg.dex_only, bool):
+            raise RuntimeError(f'HedgerConfig.dex_only is not bool: {type(cfg.dex_only)}')
+        if not isinstance(cfg.mock_realtime_source, MockRealtimeSource):
+            raise RuntimeError(f'HedgerConfig.mock_realtime_source is invalid: {type(cfg.mock_realtime_source)}')
+        if not isinstance(cfg.dex_ws_url, str):
+            raise RuntimeError(f'HedgerConfig.dex_ws_url is not str: {type(cfg.dex_ws_url)}')
+        if not bool(cfg.dex_only) and cfg.mock_realtime_source != MockRealtimeSource.LIVE:
+            raise RuntimeError('HedgerConfig.mock_realtime_source must be live when dex_only=false')
+        if cfg.mock_realtime_source.value == 'dex':
+            if len(cfg.dex_ws_url) == 0:
+                raise RuntimeError('HedgerConfig.dex_ws_url is empty for dex mock source')
+            if not cfg.dex_ws_url.startswith('wss://'):
+                raise RuntimeError('HedgerConfig.dex_ws_url must start with wss:// for dex mock source')
     
     def _rebalance(self, cw, init_balance0_raw, init_balance1_raw) -> Optional[SwapResult]:
         if cw is None:
@@ -708,7 +988,11 @@ class Hedger:
             sell_amount = float(base_needed)
         
         else:
-            raise RuntimeError('Hedger._rebalance: balances are not in opposite directions')
+            self._logger.info(
+                'hedger_rebalance_skip_non_opposite '
+                f'delta_quote={delta_quote} delta_base={delta_base}'
+            )
+            return None
         
         swapper_config = CowSwapConfig(
             swapper_type=SwapperType.COW_SWAP,

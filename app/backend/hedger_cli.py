@@ -1,8 +1,8 @@
 import argparse, os, sys
 
-from modules.hedger_class import Hedger
-from modules.hedger_helper import calc_hedger_pnl_stats
-from models.hedger_models import HedgerConfig, CexTriggerMode
+from backend.modules.hedger_class import Hedger
+from backend.modules.hedger_helper import calc_hedger_pnl_stats
+from backend.models.hedger_models import HedgerConfig, CexTriggerMode, MockRealtimeSource
 
 
 ### CLI ###
@@ -23,10 +23,11 @@ def parse_args():
     p.add_argument('--price-upper-pct', type=float)
     
     p.add_argument('--total-quote', type=float, required=True)
-    p.add_argument('--cex-ratio', type=float, default=0.5)
+    p.add_argument('--cex-ratio', type=float, default=0.255)
     
-    p.add_argument('--trigger-mode', choices=['one_tick', 'small_pct'], default='small_pct')
-    p.add_argument('--trigger-pct', type=float, default=0.05)
+    p.add_argument('--trigger-mode', choices=['pct', 'units'], required=True)
+    p.add_argument('--trigger-pct', type=float, default=0.0)
+    p.add_argument('--trigger-units', type=int, default=0)
     p.add_argument('--loop', action='store_true')
     
     p.add_argument('--mongo-uri', type=str, default='mongodb://hedging_mongo:27017')
@@ -48,10 +49,10 @@ def parse_args():
 def main():
     args = parse_args()
     
-    if str(args.trigger_mode) == CexTriggerMode.ONE_TICK.value:
-        trigger_mode = CexTriggerMode.ONE_TICK
-    elif str(args.trigger_mode) == CexTriggerMode.SMALL_PCT.value:
-        trigger_mode = CexTriggerMode.SMALL_PCT
+    if str(args.trigger_mode) == CexTriggerMode.PCT.value:
+        trigger_mode = CexTriggerMode.PCT
+    elif str(args.trigger_mode) == CexTriggerMode.UNITS.value:
+        trigger_mode = CexTriggerMode.UNITS
     else:
         raise RuntimeError(f'Unsupported trigger mode: {args.trigger_mode}')
     
@@ -84,6 +85,7 @@ def main():
         cex_ratio=float(args.cex_ratio),
         trigger_mode=trigger_mode,
         trigger_pct=float(args.trigger_pct),
+        trigger_units=int(args.trigger_units),
         mongo_uri=str(args.mongo_uri),
         mongo_db=str(args.mongo_db),
         mongo_collection=str(args.mongo_collection),
@@ -93,6 +95,9 @@ def main():
         cowswap_api_timeout_sec=int(args.cowswap_api_timeout_sec),
         cowswap_wait_timeout_sec=int(args.cowswap_wait_timeout_sec),
         cowswap_poll_interval_sec=int(args.cowswap_poll_interval_sec),
+        dex_only=False,
+        mock_realtime_source=MockRealtimeSource.LIVE,
+        dex_ws_url='',
     )
     
     hedger = Hedger(

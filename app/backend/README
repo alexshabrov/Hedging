@@ -1,0 +1,309 @@
+Backend internal service (`backend_service.py`)
+Date: 2026-02-13
+Version: 1.0
+
+==================================================
+1) Что это за слой
+==================================================
+
+`backend_service.py` поднимает внутренний Flask API для управления стратегией:
+
+- REST-команда стартует верхнеуровневый цикл стратегии (`run_id`).
+- Внутри цикла выполняется `while True` с повторными вызовами `hedger.run()`.
+- REST-команда stop останавливает цикл.
+- Сервис пишет:
+  - верхний уровень Positions (active/archive),
+  - отдельные записи по каждому `hedger.run()` (по одной записи на запуск).
+
+Важно:
+
+- `run_id` = ID цикла (долгоживущий запуск).
+- Один цикл содержит много отдельных `hedger.run()`.
+- Один документ `backend_hedger_runs` содержит ровно один `HedgerStats`.
+
+
+==================================================
+2) Точка входа и запуск
+==================================================
+
+Файл:
+
+- `app/backend/backend_service.py`
+
+Запуск:
+
+```bash
+python app/backend/backend_service.py
+```
+
+Сервис стартует как:
+
+- host: `0.0.0.0`
+- port: `8080`
+- threaded: `True`
+- debug: `False`
+
+Без внешнего сервера (gunicorn/uwsgi и т.д.).
+
+
+==================================================
+3) Обязательные ENV
+==================================================
+
+Перед стартом backend процесса должны быть заданы:
+
+- `BINANCE_KEY`
+- `BINANCE_SECRET`
+- `PRIVATE_KEY`
+
+Опционально:
+
+- `WALLET_ADDRESS`
+
+Также в payload запуска (`HedgerConfig`) обязательно передаются Mongo параметры:
+
+- `mongo_uri`
+- `mongo_db`
+
+
+==================================================
+4) Семантика run/iteration
+==================================================
+
+Определения:
+
+- run (cycle): верхнеуровневый процесс с уникальным `run_id`, создается через `POST /api/runs/start`.
+- iteration (hedger run): один проход `hedger.run()` внутри run-цикла.
+
+Связь:
+
+- `run_id` связывает верхний уровень Positions и все вложенные итерации.
+- `id` в `backend_hedger_runs` — уникальный ID конкретной итерации.
+
+
+==================================================
+5) Поведение цикла и ошибки
+==================================================
+
+После старта run:
+
+1. Создается поток цикла.
+2. Внутри `while True` выполняется `hedger.run()`.
+3. После успешной итерации обновляются агрегаты run и пишется запись итерации.
+4. При stop-флаге цикл завершается штатно.
+
+При ошибках:
+
+- Если в итерации возникает неотловленная ошибка, она поднимается в `_run_loop`.
+- run переводится в `FAILED`.
+- документ удаляется из active и переносится в archive.
+- цикл завершается.
+
+Это поведение соответствует модели “ошибка итерации = завершение верхнего цикла”.
+
+
+==================================================
+6) Mongo: коллекции и назначение
+==================================================
+
+Внутренний backend слой использует коллекции:
+
+1. `backend_positions_active`
+   - Активные run-циклы.
+   - Один документ на `run_id`.
+   - Документ перезаписывается по мере обновления состояния цикла.
+
+2. `backend_positions_archive`
+   - Завершенные (`FINISHED`) и упавшие (`FAILED`) run-циклы.
+   - При завершении цикла документ переносится из active в archive.
+
+3. `backend_hedger_runs`
+   - История итераций (`hedger.run()`) внутри циклов.
+   - Один документ = один вызов `hedger.run()`.
+   - Поля идентификации: `id`, `run_id`, `iteration_no`.
+   - В документе хранится ровно один `stats: HedgerStats`.
+
+Дополнительно:
+
+- Сам класс `Hedger` внутри своей логики продолжает писать `HedgerStats` в `mongo_collection` из `HedgerConfig` (как в CLI сценарии).
+
+
+==================================================
+7) REST API
+==================================================
+
+Все ответы JSON через `orjson`.
+
+Успешный формат:
+
+- `{ "ok": true, ... }`
+
+Ошибка:
+
+- HTTP 400
+- `{ "ok": false, "error": "..." }`
+
+
+7.1 Health
+------------------------------
+
+`GET /api/health`
+
+Назначение:
+
+- Проверка, что backend_service поднят.
+
+Ответ:
+
+- `{ "ok": true }`
+
+
+7.2 Start run cycle
+------------------------------
+
+`POST /api/runs/start`
+
+Body:
+
+- объект `BackendStartRunRequest`:
+  - `config: HedgerConfig`
+
+Пример:
+
+```json
+{
+  "config": {
+    "symbol": "ETHUSDC",
+    "rpc_url": "https://...",
+    "network": "mainnet",
+    "pool_address": "0x...",
+    "fee_pct": 0.05,
+    "price_lower": 2500.0,
+    "price_upper": 2700.0,
+    "price_lower_pct": null,
+    "price_upper_pct": null,
+    "total_quote": 1000.0,
+    "cex_ratio": 0.255,
+    "trigger_mode": "small_pct",
+    "trigger_pct": 0.05,
+    "mongo_uri": "mongodb://hedging_mongo:27017",
+    "mongo_db": "hedging",
+    "mongo_collection": "hedge_runs",
+    "tick_ms": 5,
+    "gtx_cooldown_ms": 5,
+    "entrance_timeout_ms": 60000,
+    "cowswap_api_timeout_sec": 10,
+    "cowswap_wait_timeout_sec": 300,
+    "cowswap_poll_interval_sec": 3
+  }
+}
+```
+
+Ответ:
+
+- `{ "ok": true, "run_id": "<cycle_id>" }`
+
+
+7.3 Stop run cycle
+------------------------------
+
+`POST /api/runs/<run_id>/stop`
+
+Назначение:
+
+- Ставит флаг остановки цикла.
+- Пробует остановить текущий `Hedger`, если сейчас идет итерация.
+
+Ответ:
+
+- `{ "ok": true, "run_id": "<cycle_id>" }`
+
+
+7.4 Positions view (runtime model)
+------------------------------
+
+`GET /api/positions`
+
+Возвращает runtime-view (`BackendPositionView`) по текущим run-контекстам процесса:
+
+- `run_id`, `symbol`, lifecycle status
+- runtime
+- агрегаты pnl/apr/fees/costs
+- market price (если доступно через текущий hedger context)
+
+
+7.5 Active positions docs (storage view)
+------------------------------
+
+`GET /api/positions/active`
+
+Возвращает документы верхнего уровня active из внутреннего состояния, в формате хранимого active-doc.
+
+
+7.6 Archive positions docs (storage view)
+------------------------------
+
+`GET /api/positions/archive`
+
+Возвращает документы верхнего уровня archive для завершенных/failed циклов.
+
+
+7.7 Run details
+------------------------------
+
+`GET /api/runs/<run_id>`
+
+Возвращает:
+
+- `position` (агрегированный верхний уровень),
+- `iterations` (список документов `BackendIterationRecord` из памяти процесса).
+
+Используется для drill-down по конкретному run.
+
+
+==================================================
+8) Примеры curl
+==================================================
+
+Health:
+
+```bash
+curl -s http://127.0.0.1:8080/api/health
+```
+
+Start:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/api/runs/start \
+  -H "Content-Type: application/json" \
+  -d '{"config":{"symbol":"ETHUSDC","rpc_url":"https://...","network":"mainnet","pool_address":"0x...","fee_pct":0.05,"price_lower":2500.0,"price_upper":2700.0,"price_lower_pct":null,"price_upper_pct":null,"total_quote":1000.0,"cex_ratio":0.255,"trigger_mode":"small_pct","trigger_pct":0.05,"mongo_uri":"mongodb://hedging_mongo:27017","mongo_db":"hedging","mongo_collection":"hedge_runs","tick_ms":5,"gtx_cooldown_ms":5,"entrance_timeout_ms":60000,"cowswap_api_timeout_sec":10,"cowswap_wait_timeout_sec":300,"cowswap_poll_interval_sec":3}}'
+```
+
+Stop:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/api/runs/<run_id>/stop
+```
+
+Positions active:
+
+```bash
+curl -s http://127.0.0.1:8080/api/positions/active
+```
+
+Run details:
+
+```bash
+curl -s http://127.0.0.1:8080/api/runs/<run_id>
+```
+
+
+==================================================
+9) Практические замечания
+==================================================
+
+- Это внутренний управляющий слой, без фронтенда.
+- Для продакшн-устойчивости обычно добавляют:
+  - гарантированные Mongo индексы (`run_id`, `id`, `(run_id, iteration_no)`),
+  - восстановление активных циклов после рестарта процесса (если требуется),
+  - отдельную аутентификацию внутреннего API.

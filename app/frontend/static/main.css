@@ -1,0 +1,60 @@
+.json-block {
+    max-height: 420px;
+    overflow: auto;
+    background: #f6f8fa;
+    padding: 10px;
+    border: 1px solid #dfe2e5;
+    border-radius: 4px;
+}
+
+.status-badge {
+    color: #ffffff;
+    background-color: #6c757d;
+}
+
+.status-badge-initialized { background-color: #0059b3; }
+.status-badge-running { background-color: #198754; }
+.status-badge-stopping { background-color: #fd7e14; }
+.status-badge-finished { background-color: #6f42c1; }
+.status-badge-failed { background-color: #dc3545; }
+
+.status-badge-created { background-color: #0d6efd; }
+.status-badge-pending { background-color: #17a2b8; }
+.status-badge-fulfilled { background-color: #1e7e34; }
+.status-badge-expired {
+    background-color: #f59f00;
+    color: #212529;
+}
+.status-badge-cancelled { background-color: #8b5e3c; }
+.status-badge-canceled { background-color: #7b4f2c; }
+.status-badge-timeout { background-color: #e83e8c; }
+.status-badge-api-error { background-color: #343a40; }
+
+.status-badge-waiting-trigger { background-color: #6610f2; }
+.status-badge-executing { background-color: #3f8cff; }
+.status-badge-active { background-color: #20c997; }
+.status-badge-closing { background-color: #795548; }
+.status-badge-closed { background-color: #6c757d; }
+
+.status-badge-open { background-color: #009688; }
+.status-badge-filled { background-color: #2e7d32; }
+.status-badge-success { background-color: #28a745; }
+.status-badge-completed { background-color: #4caf50; }
+.status-badge-warning {
+    background-color: #ffc107;
+    color: #212529;
+}
+.status-badge-rejected { background-color: #b02a37; }
+.status-badge-error { background-color: #c62828; }
+.status-badge-pausing { background-color: #ff9800; }
+.status-badge-stopped { background-color: #9c27b0; }
+.status-badge-initializing { background-color: #4fc3f7; }
+.status-badge-new { background-color: #00bcd4; }
+.status-badge-ok { background-color: #43a047; }
+.status-badge-done { background-color: #7cb342; }
+.status-badge-inactive {
+    background-color: #adb5bd;
+    color: #212529;
+}
+.status-badge-dead { background-color: #212529; }
+.status-badge-unknown { background-color: #6c757d; }
