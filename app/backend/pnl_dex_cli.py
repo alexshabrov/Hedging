@@ -1715,8 +1715,7 @@ def _build_report(
     lp_rows_raw: List[Dict[str, Any]] = []
     pending_lp_row_idx_by_token: Dict[int, int] = {}
     add_txids_by_token: Dict[int, str] = {}
-    rebalance_txids_by_token: Dict[int, str] = {}
-    pending_rebalance_txids: List[str] = []
+    pending_rebalance_row_idxs: List[int] = []
     wallet_checksum = Web3.to_checksum_address(str(args.wallet_address))
 
     start_weth_raw = _erc20_balance_of_cached(
@@ -1786,8 +1785,10 @@ def _build_report(
                 existing_ids=add_txids_by_token.get(token_id, ''),
                 new_id=str(tx.tx_hash),
             )
-            if token_id not in rebalance_txids_by_token and len(pending_rebalance_txids) > 0:
-                rebalance_txids_by_token[token_id] = str(pending_rebalance_txids.pop(0))
+            # Rebalance is expected right after collect; once a new add starts, pending rebalance
+            # assignment to previously closed rows should stop.
+            if len(pending_rebalance_row_idxs) > 0:
+                pending_rebalance_row_idxs = []
 
             prev = LpPositionState(
                 liquidity_open=0,
@@ -1926,7 +1927,7 @@ def _build_report(
                 'add_txids': str(add_txids_by_token.get(token_id, '')),
                 'remove_txids': str(tx.tx_hash),
                 'collect_txids': '',
-                'rebalance_txids': str(rebalance_txids_by_token.get(token_id, '')),
+                'rebalance_txids': '',
                 'close_price': float(valuation_price_at_decrease),
             })
             pending_lp_row_idx_by_token[token_id] = int(len(lp_rows_raw) - 1)
@@ -2047,18 +2048,24 @@ def _build_report(
 
             if abs(float(pending_weth)) <= 1e-12 and abs(float(pending_usdc)) <= 1e-9:
                 if token_id in pending_lp_row_idx_by_token:
+                    pending_rebalance_row_idxs.append(int(pending_lp_row_idx_by_token[token_id]))
                     del pending_lp_row_idx_by_token[token_id]
                 if token_id in add_txids_by_token:
                     del add_txids_by_token[token_id]
-                if token_id in rebalance_txids_by_token:
-                    del rebalance_txids_by_token[token_id]
 
         has_swap = abs(float(tx.swap_weth)) > 1e-18 or abs(float(tx.swap_usdc)) > 1e-9
         if bool(has_swap):
             n_swaps += 1
             sum_swap_weth += float(tx.swap_weth)
             sum_swap_usdc += float(tx.swap_usdc)
-            pending_rebalance_txids.append(str(tx.tx_hash))
+            if len(pending_rebalance_row_idxs) > 0:
+                row_idx = int(pending_rebalance_row_idxs[0])
+                if int(row_idx) < 0 or int(row_idx) >= len(lp_rows_raw):
+                    raise RuntimeError(f'pending rebalance row idx out of range: row_idx={row_idx}')
+                lp_rows_raw[row_idx]['rebalance_txids'] = _append_unique_id(
+                    existing_ids=str(lp_rows_raw[row_idx]['rebalance_txids']),
+                    new_id=str(tx.tx_hash),
+                )
 
         if tx.kind in (TxKind.ADD, TxKind.REMOVE, TxKind.COLLECT, TxKind.SWAP):
             sum_gas_eth += float(tx.gas_eth)
